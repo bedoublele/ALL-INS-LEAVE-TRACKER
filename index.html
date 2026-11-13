@@ -199,17 +199,22 @@ function seed() {
   const A = n => JOEY_APPROVES.includes(n) ? 'p10' : 'p1';
   const rows = [['p1','Belle','Sales','manager'], ['p2','Wyonna','Sales'], ['p3','Jia Liang','Sales'], ['p4','Serene','Sales'],
     ['p5','Lena','Ops'], ['p6','Zhi Shan','Ops'], ['p7','Coco','Ops'], ['p8','Shayne','Ops'],
-    ['p9','Violet','Accounts'], ['p10','Joey Chan','Accounts','manager']];
-  return {v:3, depts:['Sales','Ops','Accounts'], leaves:[], notes:[],
+    ['p9','Violet','Accounts'], ['p10','Joey Tay','Accounts','manager']];
+  return {v:4, depts:['Sales','Ops','Accounts'], leaves:[], notes:[],
     people: rows.map(([id, name, dept, role]) => mk(id, name, dept, role || 'staff', A(name)))};
 }
-function migrate(d) {          // v2 -> v3: add Joey as manager and an approving manager for everyone
-  if ((d.v || 0) >= 3) return d;
-  const byName = n => d.people.find(p => p.name === n);
-  const belle = byName('Belle'), joey = byName('Joey Chan');
-  if (joey) joey.role = 'manager';
-  d.people.forEach(p => { if (!p.approver) p.approver = (joey && JOEY_APPROVES.includes(p.name)) ? joey.id : (belle ? belle.id : ''); });
-  d.v = 3; return d;
+function migrate(d) {
+  if ((d.v || 0) < 3) {          // v2 -> v3: add Joey as manager and an approving manager for everyone
+    const byName = n => d.people.find(p => p.name === n);
+    const belle = byName('Belle'), joey = byName('Joey Chan') || byName('Joey Tay');
+    if (joey) joey.role = 'manager';
+    d.people.forEach(p => { if (!p.approver) p.approver = (joey && JOEY_APPROVES.includes(p.name)) ? joey.id : (belle ? belle.id : ''); });
+  }
+  if ((d.v || 0) < 4) {          // v3 -> v4: Joey's surname is Tay (also fix the name in saved alerts)
+    d.people.forEach(p => { if (p.name === 'Joey Chan') p.name = 'Joey Tay'; });
+    (d.notes || []).forEach(n => { n.text = String(n.text || '').split('Joey Chan').join('Joey Tay'); n.detail = String(n.detail || '').split('Joey Chan').join('Joey Tay'); });
+  }
+  d.v = 4; return d;
 }
 function load() {
   try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return migrate(d); } catch (e) {}
