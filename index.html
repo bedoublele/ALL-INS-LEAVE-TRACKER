@@ -238,7 +238,7 @@ function seed() {
     ['p5','Lena','Ops'], ['p6','Zhi Shan','Ops'], ['p7','Coco','Ops'], ['p8','Shayne','Ops'],
     ['p9','Violet','Accounts'], ['p10','Joey Chan','Accounts'], ['p11','Joey Tay','Management','manager']];
   const admin = {id:'p0', name:'Admin', dept:'Admin', role:'admin', approver:'', email:'', pin:'', ent:ent(), bf:0, bmonth:0};
-  return {v:7, ph: defaultPH(), early: [], depts:['Sales','Ops','Accounts','Management'], leaves:[], notes:[],
+  return {v:8, ph: defaultPH(), early: [], depts:['Sales','Ops','Accounts','Management'], leaves:[], notes:[],
     people: [admin, ...rows.map(([id, name, dept, role]) => mk(id, name, dept, role || 'staff', A(name)))]};
 }
 function migrate(d) {
@@ -260,9 +260,15 @@ function migrate(d) {
   }
   if ((d.v || 0) < 6 && !d.people.some(p => p.role === 'admin'))      // v6: an Admin user who can change approving managers
     d.people.push({id: d.people.some(p => p.id === 'p0') ? uid() : 'p0', name: 'Admin', dept: 'Admin', role: 'admin', approver: '', email: '', pin: '', ent: {AL:0, CCL:0, BDL:0, ML:0, WFH:0, HL:0, MC:0}, bf: 0, bmonth: 0});
+  if ((d.v || 0) < 8) {          // v8: re-apply the agreed roster and approvers
+    const belle = byName('Belle'), tay = byName('Joey Tay'), chan = byName('Joey Chan');
+    if (tay) { tay.dept = 'Management'; tay.role = 'manager'; if (belle) tay.approver = belle.id; }
+    if (chan) { chan.dept = 'Accounts'; if (chan.role === 'manager') chan.role = 'staff'; }
+    if (tay && belle) d.people.forEach(p => { if (p.role === 'admin' || p.id === tay.id) return; p.approver = JOEY_APPROVES.includes(p.name) ? tay.id : belle.id; });
+  }
   if (!Array.isArray(d.ph)) d.ph = defaultPH();
   if (!Array.isArray(d.early)) d.early = [];
-  d.v = 7; return d;
+  d.v = 8; return d;
 }
 function load() {
   try {
@@ -383,10 +389,10 @@ function pushNote(actor, to, text, detail, level, extra) {
 function notifyManagers(me, type, dates, conf, part = 'FULL', batch = '', rules = []) {
   const mgrs = managersFor(me);
   const over = conf.filter(c => c.over), any = conf.length > 0;
-  const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)}${part === 'FULL' ? '' : ', ' + PARTS[part]} (${daysText(dates.reduce((a, d) => a + dayVal(d, part), 0))})`;
+  const text = `${me.name} (${me.dept}) ${type === 'WFH' ? 'will work from home' : 'applied for ' + TYPES[type].name}, ${rangeText(dates)}${part === 'FULL' ? '' : ', ' + PARTS[part]} (${daysText(dates.reduce((a, d) => a + dayVal(d, part), 0))})`;
   const list = cs => cs.map(c => `${fmtShort(c.date)}: ${c.others.map(o => first(o.name)).join(', ')} already away`).join('; ');
   const detail = [over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '', rules.length ? 'Policy: ' + rules.join(' ') : ''].filter(Boolean).join('. ');
-  mgrs.forEach(m => pushNote(me, m, text, detail, over.length ? 'alert' : (any || rules.length) ? 'warn' : 'info', {batch}));
+  mgrs.forEach(m => pushNote(me, m, text, detail, over.length ? 'alert' : (any || rules.length) ? 'warn' : 'info', type === 'WFH' ? {batch, tag: 'fyi'} : {batch}));
   return mgrs;
 }
 function notifyTeam(me, text) { managersFor(me).forEach(m => pushNote(me, m, text, '', 'info')); }   // roster / entitlement changes
@@ -473,7 +479,7 @@ function policyHTML() {
   return `<section class="card"><details><summary style="cursor:pointer;font-weight:700;font-size:1.1rem">Leave policy</summary><ul class="policy" style="padding-left:20px;margin:10px 0 0">
     <li><b>Leave application:</b> at least 1 week’s notice, and not more than 3 months in advance.</li>
     <li><b>Urgent / unpaid leave:</b> approved case by case by your approving manager.</li>
-    <li><b>WFH:</b> update at least 3 days in advance. 1 day per week for confirmed staff. Not allowed in a week with a public holiday.</li>
+    <li><b>WFH needs no approval:</b> just key it in and your managers are told. Update at least 3 days in advance. 1 day per week for confirmed staff. Not allowed in a week with a public holiday.</li>
     <li><b>WFH and leave:</b> on 1 day of leave you may WFH if the handover is done properly and on time. On leave of more than 1 day, WFH needs special approval from management.</li>
     <li><b>Department quota:</b> maximum 1 person on leave or WFH per day.</li>
     <li><b>Earning leave:</b> employees earn leave as they work through the year.</li>
@@ -511,6 +517,7 @@ function noteState(n, me) {          // approve / decline buttons, or where the 
   if (n.outcome) return `<div class="x ok">${n.outcome === 'approved' ? 'Approved' : 'Declined'} by ${esc(n.by)}</div>`;
   const ents = db.leaves.filter(l => l.batch === n.batch);
   if (!ents.length) return '<div class="m">Cancelled by the applicant</div>';
+  if (!ents.some(isPending)) return ents[0].type === 'WFH' ? '<div class="m">Work from home: no approval needed</div>' : '';
   if (n.tag === 'approval' && n.to === me.id) return `<div class="acts"><button class="btn primary" data-a="open-req" data-b="${n.batch}" data-n="${n.id}">Review and decide</button></div>`;
   const who = db.people.find(p => p.id === ents[0].pid), ap = who && db.people.find(p => p.id === who.approver);
   return `<div class="m">Waiting for ${esc(ap ? ap.name : 'approval')} · tap to view</div>`;
@@ -666,6 +673,7 @@ function updSheet() {
   const multi = !!v.toRaw && v.toRaw !== v.from, fo = !multi && fullOnly(v.from);       // more than one day, Saturday or early release: half days are switched off
   $('#sheetForm').querySelectorAll('[name=part]').forEach(r => { r.disabled = multi || fo; if (multi || fo) r.checked = r.value === 'FULL'; });
   $('#partHint').textContent = fo ? (parse(v.from).getDay() === 6 ? 'Saturday duty counts as 1 full day.' : 'Early-release day: leave counts as 1 full day.') : multi ? 'Several days are taken as full days. Clear “To” to choose a half day.' : 'Half days are for a single day. To take several days, set a different “To” date.';
+  const wfh = v.type === 'WFH';
   if (!v.from) { box.innerHTML = '<div class="warnbox">Pick a start date.</div>'; go.disabled = true; return; }
   if (!v.dates.length) { box.innerHTML = '<div class="warnbox">The end date is before the start date.</div>'; go.disabled = true; return; }
   go.disabled = false;
@@ -675,22 +683,22 @@ function updSheet() {
   rules.forEach(r => items.push(esc(r)));
   const skipped = []; if (v.toRaw && v.toRaw !== v.from) for (let d = parse(v.from), e = parse(v.toRaw), n = 0; d <= e && n < 120; d = new Date(d.getTime() + 864e5), n++) { const k = ymd(d); if (phOf(k) && d.getDay() % 6) skipped.push(`${fmtShort(k)} ${phOf(k).name}`); }
   const phNote = skipped.length ? `<div class="okbox" style="margin-top:8px">Public holiday${skipped.length > 1 ? 's' : ''} not counted: ${esc(skipped.join(', '))}.</div>` : '';
-  box.innerHTML = phNote + (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">${notifyLine(me)} will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
-    : `<div class="okbox">No clashes. ${daysText(days)}${v.part === 'FULL' ? '' : ' · ' + PARTS[v.part]} · ${notifyLine(me)} will be notified.</div>`);
-  go.textContent = items.length ? 'Apply anyway' : v.dates.length > 1 ? `Apply ${v.dates.length} days` : v.part !== 'FULL' ? `Apply ${PARTS[v.part]}` : 'Apply leave';
+  box.innerHTML = phNote + (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">${notifyLine(me)} will be notified${wfh ? ' (no approval needed)' : ''}${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
+    : `<div class="okbox">No clashes. ${daysText(days)}${v.part === 'FULL' ? '' : ' · ' + PARTS[v.part]} · ${notifyLine(me)} will be notified${wfh ? ' (no approval needed)' : ''}.</div>`);
+  go.textContent = wfh ? (items.length ? 'Save WFH anyway' : 'Save WFH') : items.length ? 'Apply anyway' : v.dates.length > 1 ? `Apply ${v.dates.length} days` : v.part !== 'FULL' ? `Apply ${PARTS[v.part]}` : 'Apply leave';
 }
 function submitLeave() {
   const me = cur(), v = sheetVals(); if (!v.dates.length) return;
   const conf = conflicts(me, v.dates, v.part), batch = uid(), rules = ruleWarnings(me, v.type, v.dates, v.part);
   // replace anything of mine that overlaps: a full day replaces both halves, AM replaces AM/full, PM replaces PM/full
   db.leaves = db.leaves.filter(l => !(l.pid === me.id && v.dates.includes(l.date) && overlap(v.part, partOf(l))));
-  v.dates.forEach((d, i) => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, part: v.part, status: 'pending', buddy: v.buddy, note: v.note, batch, created: Date.now(), flags: i === 0 ? rules : undefined}));
+  v.dates.forEach((d, i) => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, part: v.part, status: v.type === 'WFH' ? 'approved' : 'pending', buddy: v.buddy, note: v.note, batch, created: Date.now(), flags: i === 0 ? rules : undefined}));
   const mgrs = notifyManagers(me, v.type, v.dates, conf, v.part, batch, rules);
   save(); closeSheet(); render();
   const m = mgrs.find(x => x.id === me.approver && x.email) || mgrs.find(x => x.email);
   if (!mgrs.length) return toast('Saved. There is no other manager to notify.');
   const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)}${v.part === 'FULL' ? '' : ', ' + PARTS[v.part]} (${daysText(v.dates.reduce((a, d) => a + dayVal(d, v.part), 0))}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
-  toast(`Sent for approval. ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
+  toast(`${v.type === 'WFH' ? 'Saved, no approval needed.' : 'Sent for approval.'} ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
 }
 function closeSheet() { $('#overlay').classList.remove('on'); $('#overlay').innerHTML = ''; sheet = null; }
 
@@ -816,7 +824,11 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 render();
 fetchMomPH(false);
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadCtl = !!navigator.serviceWorker.controller; let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadCtl && !reloaded && !$('#overlay').classList.contains('on') && !$('#pin')) { reloaded = true; location.reload(); } });   // pick up a new version straight away
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
