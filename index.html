@@ -120,6 +120,8 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 .note.warn{border-color:var(--sand)} .note.alert{border-color:var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0}
 .note.unread .t{font-weight:700}
 .note .m{font-size:.8rem;color:var(--mute)}
+.tag{display:inline-block;background:var(--accent);color:#1F1D1A;font-size:.72rem;font-weight:700;border-radius:99px;padding:0 9px;margin-right:8px;vertical-align:1px}
+.tag.fyi{background:var(--stone);font-weight:600}
 .note .x{font-size:.92rem;color:var(--accent-ink)}
 
 /* sheet */
@@ -182,17 +184,27 @@ const num = n => (Math.round(n * 2) / 2).toString();
 const rangeText = ds => ds.length === 1 ? fmtShort(ds[0]) : `${fmtShort(ds[0])} – ${fmtShort(ds[ds.length-1])}`;
 
 /* ---------- storage (local-first; swap load/save for a server later) ---------- */
+const JOEY_APPROVES = ['Belle', 'Violet', 'Shayne'];     // everyone else is approved by Belle
 function seed() {
   const ent = o => ({AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14, ...o});
-  const mk = (id, name, dept, role) => ({id, name, dept, role, email:'', pin:'', ent:ent(), bf:0, bmonth:0});
-  return {v:2, depts:['Sales','Ops','Accounts'], leaves:[], notes:[], people:[
-    mk('p1','Belle','Sales','manager'), mk('p2','Wyonna','Sales','staff'), mk('p3','Jia Liang','Sales','staff'), mk('p4','Serene','Sales','staff'),
-    mk('p5','Lena','Ops','staff'), mk('p6','Zhi Shan','Ops','staff'), mk('p7','Coco','Ops','staff'), mk('p8','Shayne','Ops','staff'),
-    mk('p9','Violet','Accounts','staff'), mk('p10','Joey Chan','Accounts','staff')
-  ]};
+  const mk = (id, name, dept, role, approver) => ({id, name, dept, role, approver, email:'', pin:'', ent:ent(), bf:0, bmonth:0});
+  const A = n => JOEY_APPROVES.includes(n) ? 'p10' : 'p1';
+  const rows = [['p1','Belle','Sales','manager'], ['p2','Wyonna','Sales'], ['p3','Jia Liang','Sales'], ['p4','Serene','Sales'],
+    ['p5','Lena','Ops'], ['p6','Zhi Shan','Ops'], ['p7','Coco','Ops'], ['p8','Shayne','Ops'],
+    ['p9','Violet','Accounts'], ['p10','Joey Chan','Accounts','manager']];
+  return {v:3, depts:['Sales','Ops','Accounts'], leaves:[], notes:[],
+    people: rows.map(([id, name, dept, role]) => mk(id, name, dept, role || 'staff', A(name)))};
+}
+function migrate(d) {          // v2 -> v3: add Joey as manager and an approving manager for everyone
+  if ((d.v || 0) >= 3) return d;
+  const byName = n => d.people.find(p => p.name === n);
+  const belle = byName('Belle'), joey = byName('Joey Chan');
+  if (joey) joey.role = 'manager';
+  d.people.forEach(p => { if (!p.approver) p.approver = (joey && JOEY_APPROVES.includes(p.name)) ? joey.id : (belle ? belle.id : ''); });
+  d.v = 3; return d;
 }
 function load() {
-  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return d; } catch (e) {}
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return migrate(d); } catch (e) {}
   return seed();
 }
 function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
@@ -259,21 +271,22 @@ function ruleWarnings(me, type, dates) {
   }
   return w;
 }
+const managersFor = actor => db.people.filter(p => isMgr(p) && p.id !== actor.id);   // both approving managers
+function pushNote(actor, to, text, detail, level) {
+  db.notes.unshift({id: uid(), to: to.id, from: actor.id, ts: Date.now(), read: false, level: level || 'info', text, detail: detail || '', tag: actor.approver === to.id ? 'approval' : 'fyi'});
+}
 function notifyManagers(me, type, dates, conf) {
-  let mgrs = db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id);
-  if (!db.people.some(p => isMgr(p) && p.dept === me.dept)) mgrs = db.people.filter(p => isMgr(p) && p.id !== me.id);   // dept has no manager yet
+  const mgrs = managersFor(me);
   const over = conf.filter(c => c.over), any = conf.length > 0;
   const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)} (${plural(dates.length, 'day')})`;
   const list = cs => cs.map(c => `${fmtShort(c.date)}: ${c.others.map(o => first(o.name)).join(', ')} already away`).join('; ');
   const detail = over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '';
-  mgrs.forEach(m => db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: over.length ? 'alert' : any ? 'warn' : 'info', text, detail}));
+  mgrs.forEach(m => pushNote(me, m, text, detail, over.length ? 'alert' : any ? 'warn' : 'info'));
   return mgrs;
 }
-function cancelNotice(me, l) {   // keep the manager's earlier notice from going stale
-  let mgrs = db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id);
-  if (!db.people.some(p => isMgr(p) && p.dept === me.dept)) mgrs = db.people.filter(p => isMgr(p) && p.id !== me.id);
-  mgrs.forEach(m =>
-    db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: 'info', text: `${me.name} (${me.dept}) cancelled ${TYPES[l.type].name} on ${fmtShort(l.date)}`, detail: ''}));
+function notifyTeam(me, text) { managersFor(me).forEach(m => pushNote(me, m, text, '', 'info')); }   // roster / entitlement changes
+function cancelNotice(me, l) {   // keep the managers' earlier notices from going stale
+  managersFor(me).forEach(m => pushNote(me, m, `${me.name} (${me.dept}) cancelled ${TYPES[l.type].name} on ${fmtShort(l.date)}`));
 }
 async function hashPin(pin, id) {
   const data = new TextEncoder().encode(id + ':' + pin);
@@ -345,10 +358,10 @@ function balanceHTML(me) {
 
 function notesHTML(me) {
   const mine = db.notes.filter(n => n.to === me.id).slice(0, 12), unread = mine.filter(n => !n.read).length;
-  const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'}"><div class="t">${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
+  const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'}"><div class="t">${n.tag === 'approval' ? '<span class="tag">For your approval</span>' : n.tag === 'fyi' ? '<span class="tag fyi">FYI</span>' : ''}${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
     : '<div class="sub" style="margin-top:10px">No leave applications yet. You’ll be notified here when someone applies.</div>';
   const canPush = 'Notification' in window && Notification.permission === 'default';
-  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>Leave applications</h2><div class="sub">${esc(me.dept)} team${db.depts.some(d => !db.people.some(p => isMgr(p) && p.dept === d)) ? ' and teams without a manager yet' : ''}${unread ? ` · ${unread} new` : ''}</div></div>
+  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>Leave applications</h2><div class="sub">All leave and team updates${unread ? ` · ${unread} new` : ''}</div></div>
     ${canPush ? '<button class="btn" data-a="enable-push">Enable alerts</button>' : ''}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div>${items}</section>`;
 }
 
@@ -390,7 +403,7 @@ function myLeaveHTML(me) {
 function teamHTML() {
   const groups = db.depts.map(d => {
     const ms = db.people.filter(p => p.dept === d);
-    return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b> ${isMgr(p) ? '<span class="chipdept">Manager</span>' : ''}<div class="sub">${p.email ? esc(p.email) : 'No email set'} · ${p.pin ? 'PIN set' : 'No PIN yet'}</div></div><button class="btn" data-a="edit" data-id="${p.id}">Edit</button></div>`).join('');
+    return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b> ${isMgr(p) ? '<span class="chipdept">Manager</span>' : ''}<div class="sub">Approver: ${esc((db.people.find(x => x.id === p.approver) || {name: 'none'}).name)} · ${p.email ? esc(p.email) : 'No email set'} · ${p.pin ? 'PIN set' : 'No PIN yet'}</div></div><button class="btn" data-a="edit" data-id="${p.id}">Edit</button></div>`).join('');
   }).join('');
   return `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}</section>
     <section class="card"><h2>Backup</h2><div class="sub">Data lives on this device. Export a copy to keep it safe or move it to another device.</div><div class="actions"><button class="btn" data-a="export">Export data</button><label class="btn" style="cursor:pointer">Import data<input type="file" id="imp" accept="application/json" hidden></label></div></section>`;
@@ -428,6 +441,7 @@ function sheetVals() {
   const type = $('#other').value || (r ? r.value : 'AL');
   return {type, dates: expand(sheet.date, $('#to').value), toRaw: $('#to').value, buddy: $('#buddy').value, note: $('#note').value.trim()};
 }
+const notifyLine = me => managersFor(me).map(m => esc(m.name) + (m.id === me.approver ? ' (approver)' : '')).join(' and ') || 'No one';
 function updSheet() {
   const me = cur(), v = sheetVals(), box = $('#warn'), go = $('#go');
   if (!v.dates.length) { box.innerHTML = '<div class="warnbox">The end date is before the start date.</div>'; go.disabled = true; return; }
@@ -435,8 +449,8 @@ function updSheet() {
   const conf = conflicts(me, v.dates).filter(c => v.type !== 'WFH'), rules = ruleWarnings(me, v.type, v.dates), items = [];
   conf.forEach(c => items.push(`<b>${fmtShort(c.date)}</b>: ${c.others.map(o => esc(first(o.name))).join(' and ')} already away${c.over ? ' (over the limit)' : ''}. Max 1 person per department.`));
   rules.forEach(r => items.push(esc(r)));
-  box.innerHTML = (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">Your manager will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
-    : `<div class="okbox">No clashes. ${plural(v.dates.length, 'day')} · your manager will be notified.</div>`);
+  box.innerHTML = (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">${notifyLine(me)} will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
+    : `<div class="okbox">No clashes. ${plural(v.dates.length, 'day')} · ${notifyLine(me)} will be notified.</div>`);
   go.textContent = items.length ? 'Apply anyway' : v.dates.length > 1 ? `Apply ${v.dates.length} days` : 'Apply leave';
 }
 function submitLeave() {
@@ -446,7 +460,7 @@ function submitLeave() {
   v.dates.forEach(d => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, buddy: v.buddy, note: v.note, batch, created: Date.now()}));
   const mgrs = notifyManagers(me, v.type, v.dates, conf);
   save(); closeSheet(); render();
-  const m = mgrs.find(x => x.email);
+  const m = mgrs.find(x => x.id === me.approver && x.email) || mgrs.find(x => x.email);
   if (!mgrs.length) return toast('Saved. There is no other manager to notify.');
   const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)} (${plural(v.dates.length, 'day')}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
   toast(`Saved. ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
@@ -461,6 +475,7 @@ function openPerson(id) {
     <label class="f" for="pn">Name</label><input type="text" id="pn" value="${esc(p.name)}" required>
     <div class="two"><div><label class="f" for="pd">Department</label><input type="text" id="pd" list="dl" value="${esc(p.dept)}" required><datalist id="dl">${db.depts.map(d => `<option>${esc(d)}</option>`).join('')}</datalist></div>
     <div><label class="f" for="pr">Role</label><select id="pr"><option value="staff" ${p.role === 'staff' ? 'selected' : ''}>Staff</option><option value="manager" ${p.role === 'manager' ? 'selected' : ''}>Manager</option></select></div></div>
+    <label class="f" for="pa">Approving manager</label><select id="pa">${db.people.filter(m => isMgr(m) && m.id !== id).map(m => `<option value="${m.id}" ${p.approver === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
     <label class="f" for="pe">Email (for “Also email” on notifications)</label><input type="email" id="pe" value="${esc(p.email)}">
     <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}"></div>
     <div><label class="f" for="pm">Birthday month</label><select id="pm"><option value="0">Not set</option>${MONTHS.map((m, i) => `<option value="${i+1}" ${p.bmonth === i+1 ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
@@ -474,8 +489,9 @@ function openPerson(id) {
     const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
     const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
     const rec = id ? db.people.find(x => x.id === id) : {id: uid(), pin: ''};
-    Object.assign(rec, {name, dept, role: $('#pr').value, email: $('#pe').value.trim(), ent, bf, bmonth: Number($('#pm').value)});
+    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa').value || rec.approver || '', email: $('#pe').value.trim(), ent, bf, bmonth: Number($('#pm').value)});
     if (!id) db.people.push(rec);
+    notifyTeam(cur(), id ? `${cur().name} updated ${name}’s details or entitlements` : `${cur().name} added ${name} to ${dept}`);
     if (!db.depts.includes(dept)) db.depts.push(dept);
     save(); closeSheet(); render();
   });
@@ -511,8 +527,8 @@ document.addEventListener('click', e => {
     case 'read-all': db.notes.filter(n => n.to === me.id).forEach(n => n.read = true); save(); render(); break;
     case 'enable-push': Notification.requestPermission().then(render); break;
     case 'edit': openPerson(id); break;
-    case 'reset-pin': if (confirm('Reset this person’s PIN? They will create a new one next time they sign in.')) { db.people.find(p => p.id === id).pin = ''; save(); closeSheet(); render(); toast('PIN reset.'); } break;
-    case 'del-person': if (confirm('Delete this person and all their leave records?')) { db.people = db.people.filter(p => p.id !== id); db.leaves = db.leaves.filter(l => l.pid !== id); db.notes = db.notes.filter(n => n.to !== id && n.from !== id); save(); closeSheet(); render(); } break;
+    case 'reset-pin': if (confirm('Reset this person’s PIN? They will create a new one next time they sign in.')) { const who = db.people.find(p => p.id === id); who.pin = ''; notifyTeam(cur(), `${cur().name} reset ${who.name}’s PIN`); save(); closeSheet(); render(); toast('PIN reset.'); } break;
+    case 'del-person': if (confirm('Delete this person and all their leave records?')) { notifyTeam(cur(), `${cur().name} removed ${db.people.find(p => p.id === id).name}`); db.people = db.people.filter(p => p.id !== id); db.leaves = db.leaves.filter(l => l.pid !== id); db.notes = db.notes.filter(n => n.to !== id && n.from !== id); save(); closeSheet(); render(); } break;
     case 'export': { const b = new Blob([JSON.stringify(db, null, 2)], {type: 'application/json'}), u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = `leave-tracker-${ymd(new Date())}.json`; x.click(); URL.revokeObjectURL(u); break; }
   }
 });
