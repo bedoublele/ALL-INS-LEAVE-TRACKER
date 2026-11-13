@@ -88,7 +88,8 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 .cell.today .d{background:var(--accent);color:#1F1D1A;border-radius:99px;min-width:28px;height:28px;display:inline-grid;place-items:center;padding:0 4px}
 .cell.over{border:2px solid var(--accent);background:var(--accent-soft)}
 .cell.mine{box-shadow:inset 0 0 0 2px var(--ink)}
-.bdg{position:absolute;top:6px;right:6px;font-style:normal;font-size:.7rem;font-weight:700;background:var(--accent);color:#1F1D1A;border-radius:99px;padding:1px 8px}
+.hd{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}
+.bdg{font-style:normal;font-size:.7rem;font-weight:700;background:var(--accent);color:#1F1D1A;border-radius:99px;padding:1px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .chip{display:flex;align-items:center;gap:4px;border-radius:7px;padding:1px 6px;font-size:.78rem;line-height:1.35;overflow:hidden;white-space:nowrap}
 .chip i{font-style:normal;overflow:hidden;text-overflow:ellipsis}
 .chip b{font-weight:700;opacity:.7}
@@ -104,7 +105,7 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
   .chip{width:11px;height:11px;border-radius:50%;padding:0;display:inline-block}
   .chip i,.chip b{display:none}
   .cell .chips{display:flex;flex-wrap:wrap;gap:3px}
-  .bdg{font-size:.7rem;padding:0 7px;top:auto;bottom:4px;right:4px}
+  .bdg{position:absolute;font-size:.7rem;padding:0 7px;bottom:4px;right:4px}
   .bdg .x{display:none}
   .bal-grid{grid-template-columns:repeat(2,1fr);gap:10px}
   .bal{padding:12px}
@@ -156,7 +157,7 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 <script>
 'use strict';
 /* ---------- constants ---------- */
-const KEY = 'allins-leave-v1';
+const KEY = 'allins-leave-v2';
 const TYPES = {
   AL:{name:'Annual Leave',code:'AL'}, MC:{name:'Medical Leave',code:'MC'}, TR:{name:'Training',code:'TR'},
   CCL:{name:'Child Care Leave',code:'CCL'}, BDL:{name:'Birthday Leave',code:'BDL'}, ML:{name:'Maternity Leave',code:'ML'},
@@ -183,10 +184,11 @@ const rangeText = ds => ds.length === 1 ? fmtShort(ds[0]) : `${fmtShort(ds[0])} 
 /* ---------- storage (local-first; swap load/save for a server later) ---------- */
 function seed() {
   const ent = o => ({AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14, ...o});
-  const mk = (id, name, dept, role, e) => ({id, name, dept, role, email:'', pin:'', ent:ent(e), bf:0, bmonth:0});
-  return {v:1, depts:['Sales','SST'], leaves:[], notes:[], people:[
-    mk('p1','Lena','Sales','manager',{AL:16}), mk('p2','Mairebelle Lee','Sales','staff'), mk('p3','Wyonna','Sales','staff'),
-    mk('p4','SST Manager','SST','manager',{AL:16}), mk('p5','SST Staff A','SST','staff'), mk('p6','SST Staff B','SST','staff')
+  const mk = (id, name, dept, role) => ({id, name, dept, role, email:'', pin:'', ent:ent(), bf:0, bmonth:0});
+  return {v:2, depts:['Sales','Ops','Accounts'], leaves:[], notes:[], people:[
+    mk('p1','Belle','Sales','manager'), mk('p2','Wyonna','Sales','staff'), mk('p3','Jia Liang','Sales','staff'), mk('p4','Serene','Sales','staff'),
+    mk('p5','Lena','Ops','staff'), mk('p6','Zhi Shan','Ops','staff'), mk('p7','Coco','Ops','staff'), mk('p8','Shayne','Ops','staff'),
+    mk('p9','Violet','Accounts','staff'), mk('p10','Joey Chan','Accounts','staff')
   ]};
 }
 function load() {
@@ -218,9 +220,9 @@ function balances(p, now = new Date()) {
   al.earned = Math.floor(al.ent * (now.getMonth() + 1) / 12 * 2) / 2 + bf;    // earn 1/12 per month
   return out;
 }
-const awayOn = (date, dept) => db.leaves
+const awayOn = (date, dept) => db.leaves     // dept '*' = everyone in the company
   .filter(l => l.date === date).map(l => ({l, p: db.people.find(p => p.id === l.pid)}))
-  .filter(x => x.p && x.p.dept === dept)
+  .filter(x => x.p && (dept === '*' || x.p.dept === dept))
   .sort((a, b) => a.p.name.localeCompare(b.p.name));
 const countsAway = x => x.l.type !== 'WFH';           // working from home is not "away"
 function expand(start, end) {
@@ -258,17 +260,20 @@ function ruleWarnings(me, type, dates) {
   return w;
 }
 function notifyManagers(me, type, dates, conf) {
-  const mgrs = db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id);
+  let mgrs = db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id);
+  if (!db.people.some(p => isMgr(p) && p.dept === me.dept)) mgrs = db.people.filter(p => isMgr(p) && p.id !== me.id);   // dept has no manager yet
   const over = conf.filter(c => c.over), any = conf.length > 0;
-  const text = `${me.name} applied for ${TYPES[type].name}, ${rangeText(dates)} (${plural(dates.length, 'day')})`;
+  const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)} (${plural(dates.length, 'day')})`;
   const list = cs => cs.map(c => `${fmtShort(c.date)}: ${c.others.map(o => first(o.name)).join(', ')} already away`).join('; ');
   const detail = over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '';
   mgrs.forEach(m => db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: over.length ? 'alert' : any ? 'warn' : 'info', text, detail}));
   return mgrs;
 }
 function cancelNotice(me, l) {   // keep the manager's earlier notice from going stale
-  db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id).forEach(m =>
-    db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: 'info', text: `${me.name} cancelled ${TYPES[l.type].name} on ${fmtShort(l.date)}`, detail: ''}));
+  let mgrs = db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id);
+  if (!db.people.some(p => isMgr(p) && p.dept === me.dept)) mgrs = db.people.filter(p => isMgr(p) && p.id !== me.id);
+  mgrs.forEach(m =>
+    db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: 'info', text: `${me.name} (${me.dept}) cancelled ${TYPES[l.type].name} on ${fmtShort(l.date)}`, detail: ''}));
 }
 async function hashPin(pin, id) {
   const data = new TextEncoder().encode(id + ':' + pin);
@@ -283,7 +288,7 @@ async function hashPin(pin, id) {
 function render() {
   const me = cur();
   if (!me) { ui.me = null; sessionStorage.removeItem('allins-me'); $('#app').innerHTML = loginHTML(); return; }
-  if (!ui.dept || !isMgr(me)) ui.dept = me.dept;
+  if (!ui.dept || (ui.dept !== '*' && !db.depts.includes(ui.dept))) ui.dept = me.dept;
   $('#app').innerHTML = headerHTML(me) + (ui.view === 'team' && isMgr(me) ? teamHTML() : homeHTML(me));
 }
 const LOGO = '<svg viewBox="0 0 24 24" fill="none" stroke="#1F1D1A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg>';
@@ -293,7 +298,7 @@ function loginHTML() {
   const brand = `<div class="brand" style="margin-bottom:18px"><span class="logo">${LOGO}</span><div><b>ALL INS</b><small>Leave Tracker</small></div></div>`;
   if (!p) {
     const groups = db.depts.map(d => {
-      const ms = db.people.filter(x => x.dept === d).sort((a,b) => (isMgr(b)-isMgr(a)) || a.name.localeCompare(b.name));
+      const ms = db.people.filter(x => x.dept === d).sort((a, b) => isMgr(b) - isMgr(a));
       if (!ms.length) return '';
       return `<div class="dept-h">${esc(d)}</div><div class="people">${ms.map(x => `<button class="person" data-a="pick" data-id="${x.id}"><span>${esc(x.name)}</span><small>${isMgr(x) ? 'Manager' : ''}</small></button>`).join('')}</div>`;
     }).join('');
@@ -343,7 +348,7 @@ function notesHTML(me) {
   const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'}"><div class="t">${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
     : '<div class="sub" style="margin-top:10px">No leave applications yet. You’ll be notified here when someone applies.</div>';
   const canPush = 'Notification' in window && Notification.permission === 'default';
-  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>Leave applications</h2><div class="sub">${esc(me.dept)} team${unread ? ` · ${unread} new` : ''}</div></div>
+  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>Leave applications</h2><div class="sub">${esc(me.dept)} team${db.depts.some(d => !db.people.some(p => isMgr(p) && p.dept === d)) ? ' and teams without a manager yet' : ''}${unread ? ` · ${unread} new` : ''}</div></div>
     ${canPush ? '<button class="btn" data-a="enable-push">Enable alerts</button>' : ''}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div>${items}</section>`;
 }
 
@@ -354,21 +359,23 @@ function calendarHTML(me) {
   while (cells.length % 7) cells.push(null);
   const body = cells.map(d => {
     if (!d) return '<div class="cell blank"></div>';
-    const k = ymd(d), away = awayOn(k, dept), n = away.filter(countsAway).length, wk = d.getDay() === 0 || d.getDay() === 6;
+    const k = ymd(d), away = awayOn(k, dept), total = away.filter(countsAway).length, wk = d.getDay() === 0 || d.getDay() === 6;
+    const per = {}; away.filter(countsAway).forEach(x => per[x.p.dept] = (per[x.p.dept] || 0) + 1);   // the limit is per department
+    const worstDept = Object.keys(per).sort((a, b) => per[b] - per[a])[0], n = worstDept ? per[worstDept] : 0;
     const mineHere = away.some(x => x.p.id === me.id);
     const chips = away.slice(0, 3).map(({p, l}) => {
       const show = isMgr(me) || p.id === me.id || ['AL','TR','WFH','BDL'].includes(l.type);
-      return `<span class="chip ${show ? 't-' + l.type : 't-X'}" title="${esc(p.name)}: ${show ? TYPES[l.type].name : 'Away'}"><i>${esc(first(p.name))}</i><b>${show ? l.type : 'Away'}</b></span>`;
+      return `<span class="chip ${show ? 't-' + l.type : 't-X'}" title="${esc(p.name)} (${esc(p.dept)}): ${show ? TYPES[l.type].name : 'Away'}"><i>${esc(first(p.name))}</i><b>${show ? l.type : 'Away'}</b></span>`;
     }).join('') + (away.length > 3 ? `<span class="more">+${away.length - 3}</span>` : '');
-    const label = `${fmt(k)}. ${n ? n + ' away' : 'nobody away'}`;
-    return `<button class="cell ${wk ? 'wk' : ''} ${k === todayKey ? 'today' : ''} ${n >= 2 ? 'over' : ''} ${mineHere ? 'mine' : ''}" data-a="day" data-d="${k}" aria-label="${esc(label)}"><span class="d">${d.getDate()}</span>${n >= 2 ? `<em class="bdg">${n}<span class="x"> away</span></em>` : ''}<span class="chips">${chips}</span></button>`;
+    const label = `${fmt(k)}. ${total ? total + ' away' : 'nobody away'}${n >= 2 ? ', over the limit in ' + worstDept : ''}`;
+    return `<button class="cell ${wk ? 'wk' : ''} ${k === todayKey ? 'today' : ''} ${n >= 2 ? 'over' : ''} ${mineHere ? 'mine' : ''}" data-a="day" data-d="${k}" aria-label="${esc(label)}"><span class="hd"><span class="d">${d.getDate()}</span>${n >= 2 ? `<em class="bdg" title="${esc(worstDept)}">${n}<span class="x"> away</span></em>` : ''}</span><span class="chips">${chips}</span></button>`;
   }).join('');
-  const tabs = isMgr(me) && db.depts.length > 1 ? `<div class="tabs">${db.depts.map(d => `<button class="tab" aria-pressed="${d === dept}" data-a="dept" data-d="${esc(d)}">${esc(d)}</button>`).join('')}</div>` : '';
+  const tabs = `<div class="tabs">${[...db.depts, '*'].map(d => `<button class="tab" aria-pressed="${d === dept}" data-a="dept" data-d="${esc(d)}">${d === '*' ? 'Everyone' : esc(d)}</button>`).join('')}</div>`;
   const legend = [['AL','sage'],['MC','slate'],['TR','sand'],['Other','stone']].map(([c,s]) => `<span><i class="sw" style="background:var(--${s})"></i>${c === 'AL' ? 'Annual' : c === 'MC' ? 'Medical' : c === 'TR' ? 'Training' : 'Other leave'}</span>`).join('') +
     '<span><i class="sw" style="border:1px dashed var(--mute)"></i>Work from home</span><span><i class="sw" style="background:var(--accent-soft);border:2px solid var(--accent)"></i>More than one away</span>';
   return `<section class="card"><div class="cal-head"><button class="btn" data-a="month" data-n="-1" aria-label="Previous month">‹</button><h2>${MONTHS[mo]} ${y}</h2><button class="btn" data-a="month" data-n="1" aria-label="Next month">›</button>
     <button class="btn" data-a="today">Today</button><div class="grow"></div>${tabs}</div>
-    <div class="sub" style="margin-bottom:6px">${esc(dept)} department. Tap a day to mark your leave. The orange outline means more than one person is away.</div>
+    <div class="sub" style="margin-bottom:6px">${dept === '*' ? 'Everyone' : esc(dept) + ' department'}. See who is away, and tap a day to mark your own leave. The orange outline means more than one person from the same department is away.</div>
     <div class="legend">${legend}</div>
     <div class="grid">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x => `<div class="dow">${x}</div>`).join('')}${body}</div></section>`;
 }
@@ -392,12 +399,12 @@ function teamHTML() {
 /* ---------- apply-leave sheet ---------- */
 function openSheet(date) {
   const me = cur(), mine = db.leaves.find(l => l.pid === me.id && l.date === date);
-  const away = awayOn(date, me.dept).filter(x => x.p.id !== me.id);
+  const away = awayOn(date, '*').filter(x => x.p.id !== me.id);
   const buddies = db.people.filter(p => p.dept === me.dept && p.id !== me.id);
   sheet = {date};
   const seg = ['AL','MC','TR'].map((t, i) => `<label><input type="radio" name="type" value="${t}" ${i === 0 ? 'checked' : ''}>${TYPES[t].name}</label>`).join('');
   $('#overlay').innerHTML = `<form class="sheet" id="sheetForm"><h2>${fmt(date)}</h2>
-    <div class="sub">${away.length ? 'Away today: ' + away.map(x => esc(first(x.p.name)) + (isMgr(me) || x.l.type === 'AL' || x.l.type === 'TR' ? ' (' + x.l.type + ')' : '')).join(', ') : 'Nobody else in ' + esc(me.dept) + ' is away.'}</div>
+    <div class="sub">${away.length ? 'Away: ' + away.map(x => esc(first(x.p.name)) + (x.p.dept !== me.dept ? ' [' + esc(x.p.dept) + ']' : '') + (isMgr(me) || x.l.type === 'AL' || x.l.type === 'TR' ? ' (' + x.l.type + ')' : '')).join(', ') : 'Nobody else is away.'}</div>
     ${mine ? `<div class="okbox">You already have <b>${TYPES[mine.type].name}</b> on this day. <button type="button" class="btn danger" style="margin-left:8px" data-a="del-sheet" data-id="${mine.id}">Remove it</button></div>` : ''}
     <div class="seg" role="radiogroup" aria-label="Leave type">${seg}</div>
     <label class="f" for="other">Or another type</label>
@@ -440,7 +447,7 @@ function submitLeave() {
   const mgrs = notifyManagers(me, v.type, v.dates, conf);
   save(); closeSheet(); render();
   const m = mgrs.find(x => x.email);
-  if (!mgrs.length) return toast('Saved. There is no other manager in your department to notify.');
+  if (!mgrs.length) return toast('Saved. There is no other manager to notify.');
   const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)} (${plural(v.dates.length, 'day')}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
   toast(`Saved. ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
 }
