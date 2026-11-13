@@ -169,12 +169,12 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 <script>
 'use strict';
 /* ---------- constants ---------- */
-const KEY = 'allins-leave-v2';
+const KEY = 'allins-leave-v3';
 const TYPES = {
   AL:{name:'Annual Leave',code:'AL'}, MC:{name:'Medical Leave',code:'MC'}, TR:{name:'Training',code:'TR'},
   CCL:{name:'Child Care Leave',code:'CCL'}, BDL:{name:'Birthday Leave',code:'BDL'}, ML:{name:'Maternity Leave',code:'ML'},
   WFH:{name:'Work From Home',code:'WFH'}, HL:{name:'Hospital Leave',code:'HL'},
-  UL:{name:'Urgent Leave',code:'UL'}, UPL:{name:'Unpaid Leave',code:'UPL'}
+  UL:{name:'Urgent Leave',code:'UL'}, UPL:{name:'Unpaid Leave',code:'UPL'}, X:{name:'Away',code:'X'}
 };
 const BAL = ['AL','CCL','BDL','ML','WFH','HL','MC'];     // cards shown on the balance panel
 const OTHER = ['CCL','BDL','ML','WFH','HL','UL','UPL'];             // extra choices in the apply sheet
@@ -223,65 +223,15 @@ const overlap = (a, b) => a === 'FULL' || b === 'FULL' || a === b;
 const daysText = n => n === 1 ? '1 day' : `${num(n)} days`;
 const rangeText = ds => ds.length === 1 ? fmtShort(ds[0]) : `${fmtShort(ds[0])} – ${fmtShort(ds[ds.length-1])}`;
 
-/* ---------- storage (local-first; swap load/save for a server later) ---------- */
-const JOEY_APPROVES = ['Belle', 'Violet', 'Shayne'];     // Joey Tay approves these three; everyone else is approved by Belle
-function defaultPH() {      // Singapore public holidays (MOM). The administrator can edit this list.
-  const L = [['2026-12-25','Christmas Day'],['2027-01-01','New Year’s Day'],['2027-02-06','Chinese New Year'],['2027-02-08','Chinese New Year (observed)'],['2027-03-10','Hari Raya Puasa'],['2027-03-26','Good Friday'],
-    ['2027-05-01','Labour Day'],['2027-05-17','Hari Raya Haji'],['2027-05-20','Vesak Day'],['2027-08-09','National Day'],['2027-10-28','Deepavali'],['2027-12-25','Christmas Day']];
-  return L.map(([d, name]) => ({d, name}));
-}
-function seed() {
-  const ent = o => ({AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14, ...o});
-  const mk = (id, name, dept, role, approver) => ({id, name, dept, role, approver, email:'', pin:'', ent:ent(), bf:0, bmonth:0});
-  const A = n => n === 'Joey Tay' ? '' : JOEY_APPROVES.includes(n) ? 'p11' : 'p1';      // Joey Tay has no approving manager
-  const rows = [['p1','Belle','Sales','manager'], ['p2','Wyonna','Sales'], ['p3','Jia Liang','Sales'], ['p4','Serene','Sales'],
-    ['p5','Lena','Ops'], ['p6','Zhi Shan','Ops'], ['p7','Coco','Ops'], ['p8','Shayne','Ops'],
-    ['p9','Violet','Accounts'], ['p10','Joey Chan','Accounts'], ['p11','Joey Tay','Management','manager']];
-  const admin = {id:'p0', name:'Admin', dept:'Admin', role:'admin', approver:'', email:'', pin:'', ent:ent(), bf:0, bmonth:0};
-  return {v:9, ph: defaultPH(), early: [], depts:['Sales','Ops','Accounts','Management'], leaves:[], notes:[],
-    people: [admin, ...rows.map(([id, name, dept, role]) => mk(id, name, dept, role || 'staff', A(name)))]};
-}
-function migrate(d) {
-  const byName = n => d.people.find(p => p.name === n);
-  if ((d.v || 0) < 3) {          // v2 -> v3: the approving manager (then saved as "Joey Chan") becomes a manager
-    const belle = byName('Belle'), joey = byName('Joey Chan') || byName('Joey Tay');
-    if (joey) joey.role = 'manager';
-    d.people.forEach(p => { if (!p.approver) p.approver = (joey && JOEY_APPROVES.includes(p.name)) ? joey.id : (belle ? belle.id : ''); });
-  }
-  if ((d.v || 0) < 5) {          // v5: Joey Tay (approving manager, Management) and Joey Chan (Accounts) are two different people
-    const belle = byName('Belle');
-    let tay = byName('Joey Tay'), chan = byName('Joey Chan');
-    if (chan && !tay && chan.role === 'manager') { chan.name = 'Joey Tay'; tay = chan; chan = null; }   // the single Joey record was the manager
-    if (tay) { tay.dept = 'Management'; tay.role = 'manager'; }
-    if (!d.depts.includes('Management')) d.depts.push('Management');
-    if (!byName('Joey Chan')) d.people.push({id: uid(), name: 'Joey Chan', dept: 'Accounts', role: 'staff', approver: belle ? belle.id : '', email: '', pin: '',
-      ent: {AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14}, bf: 0, bmonth: 0});
-    (d.notes || []).forEach(n => { ['text', 'detail'].forEach(k => { n[k] = String(n[k] || '').split('Joey Chan').join('Joey Tay').split('Joey Tay (Accounts)').join('Joey Tay (Management)'); }); });
-  }
-  if ((d.v || 0) < 6 && !d.people.some(p => p.role === 'admin'))      // v6: an Admin user who can change approving managers
-    d.people.push({id: d.people.some(p => p.id === 'p0') ? uid() : 'p0', name: 'Admin', dept: 'Admin', role: 'admin', approver: '', email: '', pin: '', ent: {AL:0, CCL:0, BDL:0, ML:0, WFH:0, HL:0, MC:0}, bf: 0, bmonth: 0});
-  if ((d.v || 0) < 8) {          // v8: re-apply the agreed roster and approvers
-    const belle = byName('Belle'), tay = byName('Joey Tay'), chan = byName('Joey Chan');
-    if (tay) { tay.dept = 'Management'; tay.role = 'manager'; }
-    if (chan) { chan.dept = 'Accounts'; if (chan.role === 'manager') chan.role = 'staff'; }
-    if (tay && belle) d.people.forEach(p => { if (p.role === 'admin' || p.id === tay.id) return; p.approver = JOEY_APPROVES.includes(p.name) ? tay.id : belle.id; });
-    if (tay) tay.approver = '';
-  }
-  if ((d.v || 0) < 9) {          // v9: Joey Tay has no approving manager; his leave needs no approval
-    const tay = byName('Joey Tay'); if (tay) { tay.approver = ''; d.leaves.forEach(l => { if (l.pid === tay.id && l.status === 'pending') l.status = 'approved'; }); }
-  }
-  if (!Array.isArray(d.ph)) d.ph = defaultPH();
-  if (!Array.isArray(d.early)) d.early = [];
-  d.v = 9; return d;
-}
+/* ---------- storage: the shared database is the source of truth; this tab keeps a private cache only while you are signed in ---------- */
+const API = window.__API__ || 'https://ecjwbiycwznkjbhxwixh.supabase.co/functions/v1/api';
+const emptyDb = () => ({v: 9, depts: [], people: [], leaves: [], notes: [], ph: [], early: []});
 function load() {
-  try {
-    const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && Array.isArray(d.people)) { const v0 = d.v; migrate(d); if (d.v !== v0) localStorage.setItem(KEY, JSON.stringify(d)); return d; }
-  } catch (e) {}
-  return seed();
+  try { const d = JSON.parse(sessionStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return d; } catch (e) {}
+  return emptyDb();
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; if (typeof scheduleSync === 'function') scheduleSync(); }
+function save() { try { sessionStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} phMap = null; if (typeof scheduleSync === 'function') scheduleSync(); }
+try { ['allins-leave-v2', 'allins-sync'].forEach(k => localStorage.removeItem(k)); } catch (e) {}      // older versions kept everything on the device
 let db = load();
 
 /* ---------- UI state ---------- */
@@ -307,7 +257,7 @@ function alertCheck() {                        // tell a signed-in manager about
   const key = 'allins-alerted-' + me.id, last = Number(localStorage.getItem(key) || 0);
   const mine = db.notes.filter(n => n.to === me.id), fresh = mine.filter(n => !n.read && n.ts > last);
   if (fresh.length === 1) sysNotify(fresh[0].level === 'alert' ? 'Over-limit leave alert' : fresh[0].tag === 'approved' ? 'Leave approved' : fresh[0].tag === 'declined' ? 'Leave rejected' : 'Leave update', fresh[0].text + (fresh[0].detail ? '. ' + fresh[0].detail : ''), fresh[0].id);
-  else if (fresh.length > 1) sysNotify(`${fresh.length} new leave alerts`, fresh.slice(0, 3).map(n => n.text).join('\n'), 'leave-batch');
+  else if (fresh.length > 1) sysNotify(fresh.some(n => n.level === 'alert') ? `Over-limit leave alert (${fresh.length} new)` : `${fresh.length} new leave alerts`, fresh.slice(0, 3).map(n => n.text).join('\n'), 'leave-batch');
   if (fresh.length) localStorage.setItem(key, String(Math.max(...fresh.map(n => n.ts))));
   setBadge(mine.filter(n => !n.read).length);
 }
@@ -422,15 +372,6 @@ function decide(batch, ok) {
   }
   save(); closeSheet(); render(); toast(ok ? `Approved. Everyone has been notified.` : `Rejected. ${first(who.name)} has been notified.`);
 }
-async function hashPin(pin, id) {
-  const data = new TextEncoder().encode(id + ':' + pin);
-  if (window.crypto && crypto.subtle) {
-    const b = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
-  }
-  let h = 5381; for (const c of id + pin) h = ((h << 5) + h + c.charCodeAt(0)) | 0; return 'x' + h;
-}
-
 /* ---------- rendering ---------- */
 function render() {
   const me = cur();
@@ -451,9 +392,10 @@ function loginHTML() {
       return `<div class="dept-h">${esc(d)}</div><div class="people">${ms.map(x => `<button class="person" data-a="pick" data-id="${x.id}"><span>${esc(x.name)}</span><small>${isMgr(x) ? 'Manager' : ''}</small></button>`).join('')}</div>`;
     }).join('');
     const adm = db.people.filter(isAdmin).map(x => `<button class="person" data-a="pick" data-id="${x.id}"><span>${esc(x.name)}</span><small>Administrator</small></button>`).join('');
+    if (!db.people.length) return `<div class="login">${brand}<div class="card"><h2>Connecting…</h2><div class="sub">${ui.login.err ? esc(ui.login.err) : 'Loading your team.'}</div><div class="actions"><button class="btn" data-a="retry">Try again</button></div></div></div>`;
     return `<div class="login">${brand}<div class="card"><h2>Who are you?</h2><div class="sub">Select your name. Your leave balance is shown only to you, after you enter your PIN.</div>${groups}${adm ? `<div class="dept-h">Administration</div><div class="people">${adm}</div>` : ''}</div></div>`;
   }
-  const creating = !p.pin;
+  const creating = !p.hasPin;
   return `<div class="login">${brand}<form class="card" data-form="pin"><h2>${esc(p.name)}</h2><div class="sub">${isAdmin(p) ? 'Administrator' : esc(p.dept) + (isMgr(p) ? ' · Manager' : '')}</div>
     <label class="f" for="pin">${creating ? 'Create a PIN (4 to 8 digits)' : 'Enter your PIN'}</label>
     <input id="pin" type="password" inputmode="numeric" autocomplete="${creating ? 'new-password' : 'current-password'}" pattern="[0-9]{4,8}" maxlength="8" required autofocus>
@@ -548,7 +490,7 @@ function noteState(n, me) {          // approve / decline buttons, or where the 
   if (!n.batch) return '';
   if (n.outcome) return `<div class="x ok">${n.outcome === 'approved' ? 'Approved' : 'Rejected'} by ${esc(n.by)}</div>`;
   const ents = db.leaves.filter(l => l.batch === n.batch);
-  if (!ents.length) return '<div class="m">Cancelled by the applicant</div>';
+  if (!ents.length) return '<div class="m">Cancelled or rejected</div>';
   if (!ents.some(isPending)) return ents[0].type === 'WFH' ? '<div class="m">Work from home: no approval needed</div>' : '';
   if (n.tag === 'approval' && n.to === me.id) return `<div class="acts"><button class="btn primary" data-a="open-req" data-b="${n.batch}" data-n="${n.id}">Review and decide</button></div>`;
   const who = db.people.find(p => p.id === ents[0].pid), ap = who && db.people.find(p => p.id === who.approver);
@@ -589,7 +531,7 @@ function notesHTML(me) {
     : `<div class="sub" style="margin-top:10px">${isMgr(me) ? 'No leave applications yet. You’ll be notified here when someone applies.' : 'Nothing yet. You’ll be notified here when leave is approved.'}</div>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   const pushBtn = perm === 'default' ? '<button class="btn primary" data-a="enable-push">Turn on notifications</button>' : perm === 'granted' ? '<button class="btn" data-a="test-push">Send test</button>' : '';
-  const pushNote = perm === 'granted' ? 'Notifications are on for this device.' : perm === 'denied' ? 'Notifications are blocked. Allow them for this site in your browser or phone settings.' : perm === 'unsupported' ? 'This browser can’t show notifications. On iPhone, add the app to your Home Screen first.' : isMgr(me) ? 'Get a notification on this device when someone applies for leave or leave is approved.' : 'Get a notification on this device when leave is approved.';
+  const pushNote = perm === 'granted' ? 'Notifications are on for this device, including when the app is closed.' : perm === 'denied' ? 'Notifications are blocked. Allow them for this site in your browser or phone settings.' : perm === 'unsupported' ? 'This browser can’t show notifications. On iPhone, first add the app to your Home Screen (Share, then Add to Home Screen), then open it from there.' : isMgr(me) ? 'Get a notification on this phone, even when the app is closed, when someone applies for leave or leave is approved.' : 'Get a notification on this phone, even when the app is closed, when leave is approved.';
   return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>${isMgr(me) ? 'Leave applications' : 'Notifications'}</h2><div class="sub">${isMgr(me) ? 'All leave and team updates' : 'Leave approvals'}${unread ? ` · ${unread} new` : ''}</div></div>
     ${pushBtn}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div><div class="sub" style="margin-top:6px">${pushNote}</div>${items}</section>`;
 }
@@ -634,11 +576,11 @@ function myLeaveHTML(me) {
 function teamHTML() {
   const groups = db.depts.map(d => {
     const ms = db.people.filter(p => p.dept === d);
-    return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b> ${isMgr(p) ? '<span class="chipdept">Manager</span>' : ''}<div class="sub">Approver: ${esc((db.people.find(x => x.id === p.approver) || {name: 'none'}).name)} · ${p.email ? esc(p.email) : 'No email set'} · ${p.pin ? 'PIN set' : 'No PIN yet'}</div></div>${p.id !== ui.me ? `<button class="btn" data-a="reset-pin" data-id="${p.id}">Reset PIN</button>` : ''}<button class="btn" data-a="edit" data-id="${p.id}">Edit</button></div>`).join('');
+    return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b> ${isMgr(p) ? '<span class="chipdept">Manager</span>' : ''}<div class="sub">Approver: ${esc((db.people.find(x => x.id === p.approver) || {name: 'none'}).name)} · ${p.email ? esc(p.email) : 'No email set'} · ${p.hasPin ? 'PIN set' : 'No PIN yet'}</div></div>${p.id !== ui.me ? `<button class="btn" data-a="reset-pin" data-id="${p.id}">Reset PIN</button>` : ''}<button class="btn" data-a="edit" data-id="${p.id}">Edit</button></div>`).join('');
   }).join('');
   const other = db.people.filter(m => isMgr(m) && m.id !== ui.me).map(m => esc(m.name)).join(' or ') || 'another manager';
   const meP = cur(), admins = db.people.filter(isAdmin).filter(a => a.id !== ui.me);
-  const adminRows = admins.length ? `<div class="dept-h">Administration</div>` + admins.map(a => `<div class="item"><div class="grow"><b>${esc(a.name)}</b> <span class="chipdept">Administrator</span><div class="sub">${a.pin ? 'PIN set' : 'No PIN yet'}</div></div><button class="btn" data-a="reset-pin" data-id="${a.id}">Reset PIN</button></div>`).join('') : '';
+  const adminRows = admins.length ? `<div class="dept-h">Administration</div>` + admins.map(a => `<div class="item"><div class="grow"><b>${esc(a.name)}</b> <span class="chipdept">Administrator</span><div class="sub">${a.hasPin ? 'PIN set' : 'No PIN yet'}</div></div><button class="btn" data-a="reset-pin" data-id="${a.id}">Reset PIN</button></div>`).join('') : '';
   const approverCard = isAdmin(meP) ? `<section class="card" id="approvers"><h2>Approving managers</h2><div class="sub">Choose who approves each person’s leave. Changing it moves any pending requests to the new approver and notifies the person and both managers.</div>` +
     db.depts.map(d => {
       const ms = db.people.filter(p => p.dept === d && !isAdmin(p)); if (!ms.length) return '';
@@ -657,7 +599,7 @@ function teamHTML() {
     <div class="dept-h">Early release days</div>${dl(db.early || [], 'er')}
     <div class="two" style="margin-top:10px"><div><label class="f" for="erd">Date</label><input type="date" id="erd"></div><div><label class="f" for="ern">Note</label><input type="text" id="ern" placeholder="e.g. CNY eve"></div></div><div class="actions"><button class="btn" data-a="er-add">Add early release day</button></div></section>` : '';
   return approverCard + calCard + help + `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}${adminRows}</section>
-    <section class="card"><h2>Backup</h2><div class="sub">Data is shared with the team and also kept on this device. Export a copy to keep a backup.</div><div class="actions"><button class="btn" data-a="export">Export data</button><label class="btn" style="cursor:pointer">Import data<input type="file" id="imp" accept="application/json" hidden></label></div></section>`;
+    <section class="card"><h2>Backup</h2><div class="sub">Data is stored in the team’s private database. Export a copy of what you can see as a backup.</div><div class="actions"><button class="btn" data-a="export">Export data</button></div></section>`;
 }
 
 /* ---------- apply-leave sheet ---------- */
@@ -772,7 +714,7 @@ function openPerson(id) {
     const name = $('#pn').value.trim(), dept = $('#pd').value.trim(); if (!name || !dept) return;
     const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
     const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
-    const rec = id ? db.people.find(x => x.id === id) : {id: uid(), pin: ''};
+    const rec = id ? db.people.find(x => x.id === id) : {id: uid()};
     Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver !== undefined && id ? rec.approver : defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, bmonth: Number($('#pm').value)});
     if (!id) db.people.push(rec);
     notifyTeam(cur(), id ? `${cur().name} updated ${name}’s details or entitlements` : `${cur().name} added ${name} to ${dept}`);
@@ -795,7 +737,8 @@ document.addEventListener('click', e => {
   switch (a) {
     case 'pick': ui.login = {pid: id, err: ''}; render(); break;
     case 'back': ui.login = {pid: null, err: ''}; render(); break;
-    case 'logout': ui.me = null; sessionStorage.removeItem('allins-me'); ui.login = {pid: null, err: ''}; ui.view = 'home'; closeSheet(); render(); break;
+    case 'logout': signOut(); break;
+    case 'retry': loadDirectory(); break;
     case 'view': ui.view = el.dataset.v; render(); break;
     case 'month': ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.n), 1); render(); break;
     case 'today': { const n = new Date(); ui.month = new Date(n.getFullYear(), n.getMonth(), 1); render(); break; }
@@ -816,10 +759,13 @@ document.addEventListener('click', e => {
     case 'open-req': openRequest(el.dataset.b, el.dataset.n); break;
     case 'approve': case 'decline': decide(el.dataset.b, a === 'approve'); break;
     case 'read-all': db.notes.filter(n => n.to === me.id).forEach(n => n.read = true); save(); render(); break;
-    case 'enable-push': Notification.requestPermission().then(r => { render(); if (r === 'granted') sysNotify('Notifications are on', 'You’ll be alerted here when a leave update comes in.', 'test'); }); break;
+    case 'enable-push': Notification.requestPermission().then(r => { render(); if (r === 'granted') { ensurePush(); sysNotify('Notifications are on', 'You’ll be alerted here when a leave update comes in, even when the app is closed.', 'test'); } }); break;
     case 'test-push': sysNotify('Test notification', 'This is how leave alerts will appear on this device.', 'test'); toast('Test notification sent.'); break;
     case 'edit': openPerson(id); break;
-    case 'reset-pin': if (id !== ui.me && confirm('Reset ' + db.people.find(p => p.id === id).name + '’s PIN? Their old PIN stops working and they create a new one next time they sign in.')) { const who = db.people.find(p => p.id === id); who.pin = ''; notifyTeam(cur(), `${cur().name} reset ${who.name}’s PIN`); save(); closeSheet(); render(); toast(`PIN reset for ${who.name}. They create a new PIN at their next sign-in.`); } break;
+    case 'reset-pin': if (id !== ui.me && confirm('Reset ' + db.people.find(p => p.id === id).name + '’s PIN? Their old PIN stops working and they create a new one next time they sign in.')) {
+      const who = db.people.find(p => p.id === id);
+      api('resetPin', {pid: id}).then(() => { notifyTeam(cur(), `${cur().name} reset ${who.name}’s PIN`); save(); closeSheet(); toast(`PIN reset for ${who.name}. They create a new PIN at their next sign-in.`); doSync(); }).catch(err => toast(err.message || 'Couldn’t reset the PIN.'));
+    } break;
     case 'del-person': if (confirm('Delete this person and all their leave records?')) { notifyTeam(cur(), `${cur().name} removed ${db.people.find(p => p.id === id).name}`); db.people = db.people.filter(p => p.id !== id); db.leaves = db.leaves.filter(l => l.pid !== id); db.notes = db.notes.filter(n => n.to !== id && n.from !== id); save(); closeSheet(); render(); } break;
     case 'export': { const b = new Blob([JSON.stringify(db, null, 2)], {type: 'application/json'}), u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = `leave-tracker-${ymd(new Date())}.json`; x.click(); URL.revokeObjectURL(u); break; }
   }
@@ -829,43 +775,61 @@ document.addEventListener('submit', async e => {
   e.preventDefault();
   const p = db.people.find(x => x.id === ui.login.pid), pin = $('#pin').value;
   if (!/^\d{4,8}$/.test(pin)) { ui.login.err = 'Use 4 to 8 digits.'; return render(); }
-  if (!p.pin) {
-    if (pin !== $('#pin2').value) { ui.login.err = 'The two PINs don’t match.'; return render(); }
-    p.pin = await hashPin(pin, p.id); save();
-  } else if (p.pin !== await hashPin(pin, p.id)) { ui.login.err = 'That PIN is not right.'; return render(); }
-  ui.me = p.id; sessionStorage.setItem('allins-me', p.id); ui.login = {pid: null, err: ''}; ui.view = 'home'; ui.dept = isAdmin(p) ? '*' : p.dept; ui.view = isAdmin(p) ? 'team' : 'home'; render();
+  const creating = !p.hasPin;
+  if (creating && pin !== $('#pin2').value) { ui.login.err = 'The two PINs don’t match.'; return render(); }
+  try {
+    const r = await api('login', {pid: p.id, pin, create: creating}, true);
+    sessionStorage.setItem('allins-token', r.token); sessionStorage.setItem('allins-me', p.id);
+    db = emptyDb(); sync = {cursor: 0, base: {}}; try { sessionStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (x) {}
+    ui.me = p.id; ui.login = {pid: null, err: ''};
+    await doSync(true);
+    const me = cur(); if (!me) throw new Error('Couldn’t load your data. Please try again.');
+    ui.dept = isAdmin(me) ? '*' : me.dept; ui.view = isAdmin(me) ? 'team' : 'home'; render(); ensurePush();
+  } catch (err) {
+    sessionStorage.removeItem('allins-token'); sessionStorage.removeItem('allins-me'); ui.me = null;
+    ui.login.err = err.message || 'Couldn’t sign in. Check your connection.'; await loadDirectory(true); render();
+  }
 });
 document.addEventListener('change', e => {
   if (e.target.dataset && e.target.dataset.a === 'set-approver') return setApprover(e.target.dataset.id, e.target.value);
-  if (e.target.id !== 'imp' || !e.target.files[0]) return;
-  e.target.files[0].text().then(t => {
-    try { const d = JSON.parse(t); if (!Array.isArray(d.people) || !Array.isArray(d.leaves)) throw 0; if (confirm('Replace all data on this device with this file?')) { db = d; save(); ui.me = null; sessionStorage.removeItem('allins-me'); render(); } }
-    catch (x) { toast('That file isn’t a valid leave tracker backup.'); }
-  });
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.matches && e.target.matches('.note.click')) { openRequest(e.target.dataset.b, e.target.dataset.n); return; } if (e.key === 'Escape' && sheet !== null || e.key === 'Escape' && $('#overlay').classList.contains('on')) closeSheet(); });
 
-/* another tab or window on this device changed the data: refresh, and alertCheck() inside render() raises the notification */
-window.addEventListener('storage', e => {
-  if (e.key !== KEY) return;
-  const me = cur(), before = me ? db.notes.filter(n => n.to === me.id).length : 0;
-  db = load(); render();
-  const m2 = cur(); if (m2) { const mine = db.notes.filter(n => n.to === m2.id); if (mine.length > before) toast(mine[0].text); }
-});
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (cur()) { db = load(); render(); } if (typeof doSync === 'function') doSync(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && typeof doSync === 'function') doSync(); });
 
 
-/* ---------- shared database (Supabase): every device sees the same people, leave and alerts ---------- */
-const SB_URL = 'https://ecjwbiycwznkjbhxwixh.supabase.co', SB_KEY = 'sb_publishable_2HChV8xVpBlU-lenO4mVmA_273vPEgg', SYNC_KEY = 'allins-sync';
-let sync = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();   // {cursor, base: {key: stable json | 'x'}}
+/* ---------- shared database: every device sees the same data, but only what you are allowed to see ---------- */
+const SYNC_KEY = 'allins-sync';
+let sync = (() => { try { return JSON.parse(sessionStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();   // {cursor, base: {key: stable json | 'x'}}
 let syncBusy = false, syncAgain = false, syncT = null, syncLabel = '', renderLater = false;
 const stable = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
 const cfgOf = () => ({depts: db.depts, ph: db.ph || [], early: db.early || []});
 function localRecords() { const m = {}; db.people.forEach(p => m['p:' + p.id] = p); db.leaves.forEach(l => m['l:' + l.id] = l); db.notes.forEach(n => m['n:' + n.id] = n); m['c:main'] = cfgOf(); return m; }
-const sbHdr = extra => Object.assign({apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY}, extra || {});
 const arrOf = k => k === 'p' ? db.people : k === 'l' ? db.leaves : k === 'n' ? db.notes : null;
 function setSyncLabel(t) { syncLabel = t; const e = $('#syncst'); if (e) e.textContent = t; }
+async function api(action, body, noAuth) {
+  const token = noAuth ? undefined : sessionStorage.getItem('allins-token');
+  const r = await fetch(API, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, token, ...(body || {})})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.error || ('Server error ' + r.status)); e.status = r.status; throw e; }
+  return j;
+}
+function wipeSession() {
+  ['allins-token', 'allins-me', KEY, SYNC_KEY].forEach(k => sessionStorage.removeItem(k));
+  db = emptyDb(); sync = null; ui.me = null; ui.view = 'home'; ui.login = {pid: null, err: ''}; phMap = null;
+}
+async function flushSync() { clearTimeout(syncT); for (let i = 0; i < 40 && syncBusy; i++) await new Promise(r => setTimeout(r, 100)); await doSync(); }
+async function signOut(msg) {
+  if (!msg) await flushSync();                         // make sure your last change reached the server before you leave
+  const ep = await pushEndpoint(); if (ep) { try { await api('unsubscribe', {endpoint: ep}); } catch (e) {} }
+  closeSheet(); wipeSession(); if (msg) ui.login.err = msg; render(); loadDirectory(true);
+}
+async function loadDirectory(quiet) {
+  try { const d = await api('directory', {}, true); db.people = d.people.map(p => Object.assign({ent: {}}, p)); db.depts = d.depts || []; if (!quiet) ui.login.err = ''; }
+  catch (e) { if (!db.people.length) ui.login.err = 'Can’t reach the server. Check your connection.'; }
+  if (!ui.me) render();
+}
 function applyRemote(rec, force) {      // returns true if local data changed
   const key = rec.kind + ':' + rec.id, base = sync.base;
   if (rec.kind === 'c') {
@@ -875,76 +839,67 @@ function applyRemote(rec, force) {      // returns true if local data changed
     return before !== base[key];
   }
   const arr = arrOf(rec.kind); if (!arr) return false;
-  const i = arr.findIndex(x => x.id === rec.id), cur = i >= 0 ? stable(arr[i]) : null;
-  if (!force && cur !== null && cur !== base[key]) return false;                                // local change not pushed yet: local wins
+  const i = arr.findIndex(x => x.id === rec.id), cur0 = i >= 0 ? stable(arr[i]) : null;
+  if (!force && cur0 !== null && cur0 !== base[key]) return false;                                // local change not pushed yet: local wins
   if (rec.deleted) { base[key] = 'x'; if (i >= 0) { arr.splice(i, 1); return true; } return false; }
   base[key] = stable(rec.data);
   if (i >= 0) arr[i] = rec.data; else arr.push(rec.data);
-  return cur !== base[key];
+  return cur0 !== base[key];
 }
-async function pullRows(cursor) {
-  const rows = [];
-  for (;;) {
-    const r = await fetch(`${SB_URL}/rest/v1/records?select=kind,id,data,deleted,seq&seq=gt.${cursor}&order=seq.asc&limit=1000`, {headers: sbHdr()});
-    if (!r.ok) throw new Error('pull ' + r.status);
-    const part = await r.json(); rows.push(...part); if (part.length < 1000) break; cursor = part[part.length - 1].seq;
-  }
-  return rows;
-}
-async function firstSync() {            // this device has never synced: merge what it has with what the team already shared
-  const rows = await pullRows(0); sync = {cursor: 0, base: {}};
-  if (rows.length) {
-    const remotePeople = rows.filter(r => r.kind === 'p' && !r.deleted).map(r => r.data), idMap = {}, localPin = {};
-    db.people.slice().forEach(p => {                       // local-only person with the same name as a shared one: use the shared one
-      if (remotePeople.some(r => r.id === p.id)) { if (p.pin) localPin[p.id] = p.pin; return; }
-      const twin = remotePeople.find(r => r.name === p.name); if (twin) { idMap[p.id] = twin.id; if (p.pin && !twin.pin) localPin[twin.id] = p.pin; db.people = db.people.filter(x => x.id !== p.id); }
-    });
-    Object.keys(idMap).length && (db.leaves.forEach(l => { if (idMap[l.pid]) l.pid = idMap[l.pid]; }), db.notes.forEach(n => { if (idMap[n.to]) n.to = idMap[n.to]; if (idMap[n.from]) n.from = idMap[n.from]; }));
-    rows.forEach(r => { applyRemote(r, true); sync.cursor = Math.max(sync.cursor, r.seq); });
-    Object.keys(localPin).forEach(id => { const p = db.people.find(x => x.id === id); if (p && !p.pin) p.pin = localPin[id]; });     // keep a PIN created on this device
-    localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; renderLater = true;
-  }
-  localStorage.setItem(SYNC_KEY, JSON.stringify(sync));
-}
-async function pushLocal() {
+function pendingChanges() {
   const L = localRecords(), up = [];
-  Object.keys(L).forEach(key => { const s = stable(L[key]); if (sync.base[key] !== s) up.push({key, s, row: {kind: key[0], id: key.slice(2), data: L[key], deleted: false}}); });
+  Object.keys(L).forEach(key => { if (key === 'c:main' && !(sync.cursor > 0)) return; const s = stable(L[key]); if (sync.base[key] !== s) up.push({key, s, row: {kind: key[0], id: key.slice(2), data: L[key], deleted: false}}); });
   Object.keys(sync.base).forEach(key => { if (!(key in L) && sync.base[key] !== 'x') up.push({key, s: 'x', row: {kind: key[0], id: key.slice(2), data: null, deleted: true}}); });
-  for (let i = 0; i < up.length; i += 200) {
-    const part = up.slice(i, i + 200);
-    const r = await fetch(`${SB_URL}/rest/v1/records?on_conflict=kind,id`, {method: 'POST', headers: sbHdr({'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal'}), body: JSON.stringify(part.map(x => x.row))});
-    if (!r.ok) throw new Error('push ' + r.status);
-    part.forEach(x => { sync.base[x.key] = x.s; });
-  }
+  return up;
 }
-async function pullRemote() {
-  const rows = await pullRows(sync.cursor || 0); let changed = false;
-  rows.forEach(r => { if (applyRemote(r)) changed = true; sync.cursor = Math.max(sync.cursor || 0, r.seq); });
-  return changed;
-}
-async function doSync() {
+async function doSync(fromLogin) {
+  if (!sessionStorage.getItem('allins-token')) return;
   if (syncBusy) { syncAgain = true; return; }
   syncBusy = true;
   try {
-    if (!sync) await firstSync();
-    await pushLocal();
-    const changed = await pullRemote();
-    if (changed || renderLater) { localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; afterPull(); }
+    if (!sync) sync = {cursor: 0, base: {}};
+    let changed = false, more = true, first = true;
+    while (more) {
+      const up = first ? pendingChanges().slice(0, 400) : []; first = false;
+      const r = await api('sync', {cursor: sync.cursor || 0, changes: up.map(x => x.row)});
+      const rej = new Set((r.rejected || []).map(x => x.kind + ':' + x.id));
+      up.forEach(x => { if (!rej.has(x.key)) sync.base[x.key] = x.s; });
+      (r.fix || []).forEach(x => { if (applyRemote(x, true)) changed = true; });
+      (r.rows || []).forEach(x => { if (applyRemote(x)) changed = true; });
+      sync.cursor = r.cursor; more = !!r.more;
+      if (rej.size) toast('Some changes weren’t allowed and were undone.');
+    }
+    try { sessionStorage.setItem(KEY, JSON.stringify(db)); sessionStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} phMap = null;
+    if (changed || renderLater) { if (fromLogin) {} else afterPull(); }
     setSyncLabel('Synced ' + new Date().toLocaleTimeString('en-SG', {hour: 'numeric', minute: '2-digit'}) + '.');
-  } catch (e) { setSyncLabel('Offline. Your changes will sync when you reconnect.'); }
-  finally { try { if (sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} syncBusy = false; if (syncAgain) { syncAgain = false; scheduleSync(); } }
+  } catch (e) {
+    if (e.status === 401) { syncBusy = false; return signOut('Please sign in again.'); }
+    setSyncLabel('Offline. Your changes will sync when you reconnect.');
+  } finally { syncBusy = false; if (syncAgain) { syncAgain = false; scheduleSync(); } }
 }
 function afterPull() {                  // update the screen with what other devices changed, without interrupting typing
   const ae = document.activeElement, typing = ae && ae !== document.body && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName);
-  if ($('#overlay').classList.contains('on') || typing) { renderLater = true; return; }
+  if (!ui.me || $('#overlay').classList.contains('on') || typing) { renderLater = true; return; }
   renderLater = false; render();
 }
 function scheduleSync() { clearTimeout(syncT); syncT = setTimeout(doSync, 400); }
 document.addEventListener('focusout', () => { if (renderLater) setTimeout(() => { if (renderLater) afterPull(); }, 150); });
+/* ---------- push notifications that arrive even when the app is closed ---------- */
+const urlB64 = s => Uint8Array.from(atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+async function pushEndpoint() { try { if (!swReg || !swReg.pushManager) return ''; const s = await swReg.pushManager.getSubscription(); return s ? s.endpoint : ''; } catch (e) { return ''; } }
+async function ensurePush() {
+  try {
+    if (!('PushManager' in window) || !('Notification' in window) || Notification.permission !== 'granted' || !sessionStorage.getItem('allins-token')) return;
+    const reg = swReg || await navigator.serviceWorker.ready; swReg = reg;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) { const cfg = await api('config', {}, true); sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: urlB64(cfg.vapidPublicKey)}); }
+    await api('subscribe', {sub: sub.toJSON()});
+  } catch (e) {}
+}
 setInterval(() => { if (document.visibilityState === 'visible') doSync(); }, 8000);
-window.addEventListener('online', doSync);
+window.addEventListener('online', () => doSync());
 render();
-doSync();
+if (sessionStorage.getItem('allins-token') && ui.me) doSync().then(ensurePush); else { wipeSession(); loadDirectory(); }
 fetchMomPH(false);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const hadCtl = !!navigator.serviceWorker.controller; let reloaded = false;

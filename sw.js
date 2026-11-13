@@ -1,5 +1,5 @@
 // Offline-first app shell. Bump VERSION when files change so installed copies update.
-const VERSION = 'allins-leave-v15';
+const VERSION = 'allins-leave-v16';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
@@ -15,6 +15,11 @@ self.addEventListener('fetch', e => {
   }));
 });
 
+// Push from the server: shows a notification even when the app is closed.
+self.addEventListener('push', e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (x) { d = {body: e.data ? e.data.text() : ''}; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Leave update', {body: d.body || '', tag: d.tag || 'leave', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png'}));
+});
 // Tapping a notification opens (or focuses) the app.
 self.addEventListener('notificationclick', e => {
   e.notification.close();
