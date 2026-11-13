@@ -281,7 +281,7 @@ function load() {
   } catch (e) {}
   return seed();
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; }
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; if (typeof scheduleSync === 'function') scheduleSync(); }
 let db = load();
 
 /* ---------- UI state ---------- */
@@ -496,7 +496,7 @@ function policyHTML() {
 function homeHTML(me) {
   if (isAdmin(me)) return calendarHTML(me) + '<div class="footer">Administrator view. The calendar is read-only; use Admin to manage approving managers and people.</div>' + policyHTML();
   return balanceHTML(me) + notesHTML(me) + calendarHTML(me) + myLeaveHTML(me) + policyHTML() +
-    '<div class="footer">Data is saved on this device. Each person’s balance is visible only after signing in with their own PIN.</div>';
+    '<div class="footer">Shared with your team and saved on this device. <span id="syncst">' + esc(typeof syncLabel === 'string' ? syncLabel : '') + '</span> Each person’s balance is shown only after signing in with their own PIN.</div>';
 }
 
 function balanceHTML(me) {
@@ -657,7 +657,7 @@ function teamHTML() {
     <div class="dept-h">Early release days</div>${dl(db.early || [], 'er')}
     <div class="two" style="margin-top:10px"><div><label class="f" for="erd">Date</label><input type="date" id="erd"></div><div><label class="f" for="ern">Note</label><input type="text" id="ern" placeholder="e.g. CNY eve"></div></div><div class="actions"><button class="btn" data-a="er-add">Add early release day</button></div></section>` : '';
   return approverCard + calCard + help + `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}${adminRows}</section>
-    <section class="card"><h2>Backup</h2><div class="sub">Data lives on this device. Export a copy to keep it safe or move it to another device.</div><div class="actions"><button class="btn" data-a="export">Export data</button><label class="btn" style="cursor:pointer">Import data<input type="file" id="imp" accept="application/json" hidden></label></div></section>`;
+    <section class="card"><h2>Backup</h2><div class="sub">Data is shared with the team and also kept on this device. Export a copy to keep a backup.</div><div class="actions"><button class="btn" data-a="export">Export data</button><label class="btn" style="cursor:pointer">Import data<input type="file" id="imp" accept="application/json" hidden></label></div></section>`;
 }
 
 /* ---------- apply-leave sheet ---------- */
@@ -853,9 +853,98 @@ window.addEventListener('storage', e => {
   db = load(); render();
   const m2 = cur(); if (m2) { const mine = db.notes.filter(n => n.to === m2.id); if (mine.length > before) toast(mine[0].text); }
 });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && cur()) { db = load(); render(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (cur()) { db = load(); render(); } if (typeof doSync === 'function') doSync(); } });
 
+
+/* ---------- shared database (Supabase): every device sees the same people, leave and alerts ---------- */
+const SB_URL = 'https://ecjwbiycwznkjbhxwixh.supabase.co', SB_KEY = 'sb_publishable_2HChV8xVpBlU-lenO4mVmA_273vPEgg', SYNC_KEY = 'allins-sync';
+let sync = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();   // {cursor, base: {key: stable json | 'x'}}
+let syncBusy = false, syncAgain = false, syncT = null, syncLabel = '', renderLater = false;
+const stable = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
+const cfgOf = () => ({depts: db.depts, ph: db.ph || [], early: db.early || []});
+function localRecords() { const m = {}; db.people.forEach(p => m['p:' + p.id] = p); db.leaves.forEach(l => m['l:' + l.id] = l); db.notes.forEach(n => m['n:' + n.id] = n); m['c:main'] = cfgOf(); return m; }
+const sbHdr = extra => Object.assign({apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY}, extra || {});
+const arrOf = k => k === 'p' ? db.people : k === 'l' ? db.leaves : k === 'n' ? db.notes : null;
+function setSyncLabel(t) { syncLabel = t; const e = $('#syncst'); if (e) e.textContent = t; }
+function applyRemote(rec, force) {      // returns true if local data changed
+  const key = rec.kind + ':' + rec.id, base = sync.base;
+  if (rec.kind === 'c') {
+    if (rec.deleted || !rec.data) return false;
+    if (!force && base[key] !== undefined && stable(cfgOf()) !== base[key]) return false;      // local change not pushed yet: local wins
+    const before = stable(cfgOf()); db.depts = rec.data.depts || db.depts; db.ph = rec.data.ph || []; db.early = rec.data.early || []; base[key] = stable(cfgOf());
+    return before !== base[key];
+  }
+  const arr = arrOf(rec.kind); if (!arr) return false;
+  const i = arr.findIndex(x => x.id === rec.id), cur = i >= 0 ? stable(arr[i]) : null;
+  if (!force && cur !== null && cur !== base[key]) return false;                                // local change not pushed yet: local wins
+  if (rec.deleted) { base[key] = 'x'; if (i >= 0) { arr.splice(i, 1); return true; } return false; }
+  base[key] = stable(rec.data);
+  if (i >= 0) arr[i] = rec.data; else arr.push(rec.data);
+  return cur !== base[key];
+}
+async function pullRows(cursor) {
+  const rows = [];
+  for (;;) {
+    const r = await fetch(`${SB_URL}/rest/v1/records?select=kind,id,data,deleted,seq&seq=gt.${cursor}&order=seq.asc&limit=1000`, {headers: sbHdr()});
+    if (!r.ok) throw new Error('pull ' + r.status);
+    const part = await r.json(); rows.push(...part); if (part.length < 1000) break; cursor = part[part.length - 1].seq;
+  }
+  return rows;
+}
+async function firstSync() {            // this device has never synced: merge what it has with what the team already shared
+  const rows = await pullRows(0); sync = {cursor: 0, base: {}};
+  if (rows.length) {
+    const remotePeople = rows.filter(r => r.kind === 'p' && !r.deleted).map(r => r.data), idMap = {}, localPin = {};
+    db.people.slice().forEach(p => {                       // local-only person with the same name as a shared one: use the shared one
+      if (remotePeople.some(r => r.id === p.id)) { if (p.pin) localPin[p.id] = p.pin; return; }
+      const twin = remotePeople.find(r => r.name === p.name); if (twin) { idMap[p.id] = twin.id; if (p.pin && !twin.pin) localPin[twin.id] = p.pin; db.people = db.people.filter(x => x.id !== p.id); }
+    });
+    Object.keys(idMap).length && (db.leaves.forEach(l => { if (idMap[l.pid]) l.pid = idMap[l.pid]; }), db.notes.forEach(n => { if (idMap[n.to]) n.to = idMap[n.to]; if (idMap[n.from]) n.from = idMap[n.from]; }));
+    rows.forEach(r => { applyRemote(r, true); sync.cursor = Math.max(sync.cursor, r.seq); });
+    Object.keys(localPin).forEach(id => { const p = db.people.find(x => x.id === id); if (p && !p.pin) p.pin = localPin[id]; });     // keep a PIN created on this device
+    localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; renderLater = true;
+  }
+  localStorage.setItem(SYNC_KEY, JSON.stringify(sync));
+}
+async function pushLocal() {
+  const L = localRecords(), up = [];
+  Object.keys(L).forEach(key => { const s = stable(L[key]); if (sync.base[key] !== s) up.push({key, s, row: {kind: key[0], id: key.slice(2), data: L[key], deleted: false}}); });
+  Object.keys(sync.base).forEach(key => { if (!(key in L) && sync.base[key] !== 'x') up.push({key, s: 'x', row: {kind: key[0], id: key.slice(2), data: null, deleted: true}}); });
+  for (let i = 0; i < up.length; i += 200) {
+    const part = up.slice(i, i + 200);
+    const r = await fetch(`${SB_URL}/rest/v1/records?on_conflict=kind,id`, {method: 'POST', headers: sbHdr({'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal'}), body: JSON.stringify(part.map(x => x.row))});
+    if (!r.ok) throw new Error('push ' + r.status);
+    part.forEach(x => { sync.base[x.key] = x.s; });
+  }
+}
+async function pullRemote() {
+  const rows = await pullRows(sync.cursor || 0); let changed = false;
+  rows.forEach(r => { if (applyRemote(r)) changed = true; sync.cursor = Math.max(sync.cursor || 0, r.seq); });
+  return changed;
+}
+async function doSync() {
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true;
+  try {
+    if (!sync) await firstSync();
+    await pushLocal();
+    const changed = await pullRemote();
+    if (changed || renderLater) { localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; afterPull(); }
+    setSyncLabel('Synced ' + new Date().toLocaleTimeString('en-SG', {hour: 'numeric', minute: '2-digit'}) + '.');
+  } catch (e) { setSyncLabel('Offline. Your changes will sync when you reconnect.'); }
+  finally { try { if (sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} syncBusy = false; if (syncAgain) { syncAgain = false; scheduleSync(); } }
+}
+function afterPull() {                  // update the screen with what other devices changed, without interrupting typing
+  const ae = document.activeElement, typing = ae && ae !== document.body && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName);
+  if ($('#overlay').classList.contains('on') || typing) { renderLater = true; return; }
+  renderLater = false; render();
+}
+function scheduleSync() { clearTimeout(syncT); syncT = setTimeout(doSync, 400); }
+document.addEventListener('focusout', () => { if (renderLater) setTimeout(() => { if (renderLater) afterPull(); }, 150); });
+setInterval(() => { if (document.visibilityState === 'visible') doSync(); }, 8000);
+window.addEventListener('online', doSync);
 render();
+doSync();
 fetchMomPH(false);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const hadCtl = !!navigator.serviceWorker.controller; let reloaded = false;
