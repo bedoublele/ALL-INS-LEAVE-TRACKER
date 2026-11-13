@@ -194,10 +194,29 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const num = n => (Math.round(n * 2) / 2).toString();
 const PARTS = {FULL: 'Full day', AM: 'Half day AM', PM: 'Half day PM'};
 const partOf = l => l.part || 'FULL';                                  // older records have no part: full day
-const phOf = d => (db.ph || []).find(x => x.d === d);
+/* Public holidays: MOM's official list (data.gov.sg) fetched and cached, plus anything the administrator added. */
+const MOM_IDS = ['d_8ef23381f9417e4d4254ee8b4dcdb176', 'd_0ba69fc6d56717ff0bf8083c6af3bb84'];    // MOM consolidated 2020-2026, and 2027
+const MOM_KEY = 'allins-ph-mom';
+let momPH = (() => { try { return JSON.parse(localStorage.getItem(MOM_KEY)) || {ts: 0, list: []}; } catch (e) { return {ts: 0, list: []}; } })();
+let phMap = null;
+const phAll = () => { if (!phMap) { phMap = new Map(); (db.ph || []).forEach(x => phMap.set(x.d, {d: x.d, name: x.name, src: 'Added'})); momPH.list.forEach(x => phMap.set(x.d, {d: x.d, name: x.name, src: 'MOM'})); } return [...phMap.values()]; };
+const phOf = d => { phAll(); return phMap.get(d); };
+async function fetchMomPH(force) {
+  if (!force && Date.now() - momPH.ts < 864e5) return false;
+  try {
+    const js = await Promise.all(MOM_IDS.map(id => fetch(`https://data.gov.sg/api/action/datastore_search?resource_id=${id}&limit=500`).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })));
+    const list = []; js.forEach(j => ((j.result && j.result.records) || []).forEach(r => { if (/^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.holiday) list.push({d: r.date, name: String(r.holiday)}); }));
+    if (!list.length) return false;
+    const changed = JSON.stringify(list) !== JSON.stringify(momPH.list);
+    momPH = {ts: Date.now(), list}; localStorage.setItem(MOM_KEY, JSON.stringify(momPH)); phMap = null;
+    if (changed && !$('#overlay').classList.contains('on') && !(ui.me === null && ui.login.pid)) render();
+    return true;
+  } catch (e) { return false; }
+}
 const isEarly = d => (db.early || []).some(x => x.d === d);
 const fullOnly = d => !!d && (parse(d).getDay() === 6 || isEarly(d));      // Saturday duty and early-release days always count as a full day
-const valOf = l => (partOf(l) === 'FULL' || fullOnly(l.date)) ? 1 : 0.5;
+const valOf = l => phOf(l.date) ? 0 : (partOf(l) === 'FULL' || fullOnly(l.date)) ? 1 : 0.5;      // a public holiday is never deducted
+const dayVal = (d, part) => phOf(d) ? 0 : (part === 'FULL' || fullOnly(d)) ? 1 : 0.5;
 const weekKey = d => { const x = parse(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return ymd(x); };   // Monday of that week
 const covers = (part, half) => part === 'FULL' || part === half;      // does this part include the AM / PM half?
 const overlap = (a, b) => a === 'FULL' || b === 'FULL' || a === b;
@@ -252,7 +271,7 @@ function load() {
   } catch (e) {}
   return seed();
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); phMap = null; }
 let db = load();
 
 /* ---------- UI state ---------- */
@@ -307,12 +326,13 @@ const countsAway = x => true;                         // department quota: max 1
 function expand(start, end) {
   if (!start) return [];
   if (!end || end === start) return [start];
-  const a = parse(start), b = parse(end), out = [start];
+  const a = parse(start), b = parse(end), out = [];
   if (b < a) return [];
+  if (!phOf(start)) out.push(start);
   for (let d = new Date(a.getTime() + 864e5), n = 0; d <= b && n < 120; d = new Date(d.getTime() + 864e5), n++) {
-    if (d.getDay() !== 0 && d.getDay() !== 6) out.push(ymd(d));      // ranges skip Sat/Sun
+    if (d.getDay() !== 0 && d.getDay() !== 6 && !phOf(ymd(d))) out.push(ymd(d));      // ranges skip Sat/Sun and public holidays
   }
-  return out;
+  return out.length ? out : [start];
 }
 function conflicts(me, dates, part = 'FULL') {
   const res = [];
@@ -325,7 +345,7 @@ function conflicts(me, dates, part = 'FULL') {
 function ruleWarnings(me, type, dates, part = 'FULL') {
   const w = [], today = new Date(); today.setHours(0,0,0,0);
   if (!dates.length) return w;
-  const days = dates.reduce((a, d) => a + (part === 'FULL' || fullOnly(d) ? 1 : 0.5), 0);
+  const days = dates.reduce((a, d) => a + dayVal(d, part), 0);
   if (type === 'AL') {
     if ((parse(dates[0]) - today) / 864e5 < 7) w.push('Annual leave needs at least 1 week’s notice.');
     const lim = new Date(today); lim.setMonth(lim.getMonth() + 3);
@@ -339,7 +359,7 @@ function ruleWarnings(me, type, dates, part = 'FULL') {
     Object.keys(weeks).forEach(wk => {
       const have = db.leaves.filter(l => l.pid === me.id && l.type === 'WFH' && weekKey(l.date) === wk && !dates.includes(l.date)).length;
       if (have + weeks[wk] > 1) w.push(`Only 1 WFH day per week (week of ${fmtShort(wk)}).`);
-      (db.ph || []).filter(x => weekKey(x.d) === wk).forEach(x => w.push(`WFH is not allowed in a week with a public holiday (${x.name}, ${fmtShort(x.d)}).`));
+      phAll().filter(x => weekKey(x.d) === wk).forEach(x => w.push(`WFH is not allowed in a week with a public holiday (${x.name}, ${fmtShort(x.d)}).`));
     });
     dates.forEach(d => db.leaves.filter(l => l.pid === me.id && l.type !== 'WFH' && l.type !== 'TR' && l.date === d).forEach(l => {
       const len = l.batch ? db.leaves.filter(x => x.pid === me.id && x.batch === l.batch).length : 1;
@@ -347,7 +367,7 @@ function ruleWarnings(me, type, dates, part = 'FULL') {
     }));
   } else if (type !== 'TR' && dates.length > 1 && dates.some(d => db.leaves.some(l => l.pid === me.id && l.type === 'WFH' && l.date === d)))
     w.push('You have WFH on a day in this multi-day leave. WFH is not allowed on leave of more than 1 day unless management gives special approval.');
-  dates.forEach(d => { if (parse(d).getDay() === 6) w.push(`${fmtShort(d)} is a Saturday duty: it counts as 1 full day.`); else if (isEarly(d)) w.push(`${fmtShort(d)} is an early-release day: leave counts as 1 full day.`); });
+  dates.forEach(d => { if (phOf(d)) w.push(`${fmtShort(d)} is a public holiday (${phOf(d).name}): it is not deducted from your balance.`); else if (parse(d).getDay() === 6) w.push(`${fmtShort(d)} is a Saturday duty: it counts as 1 full day.`); else if (isEarly(d)) w.push(`${fmtShort(d)} is an early-release day: leave counts as 1 full day.`); });
   if (BAL.includes(type) && type !== 'WFH') {
     const b = balances(me)[type];
     if (b.ent === 0 && type !== 'AL') w.push(`You have no ${TYPES[type].name} entitlement set.`);
@@ -363,7 +383,7 @@ function pushNote(actor, to, text, detail, level, extra) {
 function notifyManagers(me, type, dates, conf, part = 'FULL', batch = '', rules = []) {
   const mgrs = managersFor(me);
   const over = conf.filter(c => c.over), any = conf.length > 0;
-  const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)}${part === 'FULL' ? '' : ', ' + PARTS[part]} (${daysText(dates.reduce((a, d) => a + (part === 'FULL' || fullOnly(d) ? 1 : 0.5), 0))})`;
+  const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)}${part === 'FULL' ? '' : ', ' + PARTS[part]} (${daysText(dates.reduce((a, d) => a + dayVal(d, part), 0))})`;
   const list = cs => cs.map(c => `${fmtShort(c.date)}: ${c.others.map(o => first(o.name)).join(', ')} already away`).join('; ');
   const detail = [over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '', rules.length ? 'Policy: ' + rules.join(' ') : ''].filter(Boolean).join('. ');
   mgrs.forEach(m => pushNote(me, m, text, detail, over.length ? 'alert' : (any || rules.length) ? 'warn' : 'info', {batch}));
@@ -592,8 +612,8 @@ function teamHTML() {
     <li>Tell them to pick their name on the sign-in screen and create a new PIN (4 to 8 digits).</li></ol>
     <div class="okbox">Forgot your <b>own</b> PIN? Ask ${isAdmin(meP) ? 'a manager' : other} to reset it using the steps above. You can’t reset your own PIN.</div></section>`;
   const dl = (arr, kind) => arr.slice().sort((a, b) => a.d.localeCompare(b.d)).map(x => `<div class="item"><div class="grow"><b>${fmt(x.d)} ${x.d.slice(0, 4)}</b> · ${esc(x.name || x.note || '')}</div><button class="btn ghost danger" data-a="${kind}-del" data-d="${x.d}">Remove</button></div>`).join('') || '<div class="sub">None yet.</div>';
-  const calCard = isAdmin(meP) ? `<section class="card"><h2>Public holidays and early release</h2><div class="sub">Public holidays block WFH for that week. Early-release days make any leave on that day count as 1 full day. Check the public holiday list against MOM’s calendar each year.</div>
-    <div class="dept-h">Public holidays</div>${dl(db.ph || [], 'ph')}
+  const calCard = isAdmin(meP) ? `<section class="card"><h2>Public holidays and early release</h2><div class="sub">Public holidays block WFH for that week. Early-release days make any leave on that day count as 1 full day. Leave that falls on a public holiday is never deducted.</div>
+    <div class="dept-h">Public holidays</div><div class="sub">Official list from MOM (data.gov.sg), ${momPH.ts ? 'last updated ' + new Date(momPH.ts).toLocaleString('en-SG', {day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit'}) : 'not fetched yet on this device'}. Upcoming dates shown. <button class="btn" data-a="ph-refresh" style="margin-left:6px">Refresh from MOM</button></div>${phAll().filter(x => x.d >= ymd(new Date())).sort((a, b) => a.d.localeCompare(b.d)).map(x => `<div class="item"><div class="grow"><b>${fmt(x.d)} ${x.d.slice(0, 4)}</b> · ${esc(x.name)} <span class="chipdept">${x.src === 'MOM' ? 'MOM' : 'Added by admin'}</span></div>${x.src === 'MOM' ? '' : `<button class="btn ghost danger" data-a="ph-del" data-d="${x.d}">Remove</button>`}</div>`).join('') || '<div class="sub">None.</div>'}
     <div class="two" style="margin-top:10px"><div><label class="f" for="phd">Date</label><input type="date" id="phd"></div><div><label class="f" for="phn">Name</label><input type="text" id="phn" placeholder="e.g. Deepavali"></div></div><div class="actions"><button class="btn" data-a="ph-add">Add public holiday</button></div>
     <div class="dept-h">Early release days</div>${dl(db.early || [], 'er')}
     <div class="two" style="margin-top:10px"><div><label class="f" for="erd">Date</label><input type="date" id="erd"></div><div><label class="f" for="ern">Note</label><input type="text" id="ern" placeholder="e.g. CNY eve"></div></div><div class="actions"><button class="btn" data-a="er-add">Add early release day</button></div></section>` : '';
@@ -649,11 +669,13 @@ function updSheet() {
   if (!v.from) { box.innerHTML = '<div class="warnbox">Pick a start date.</div>'; go.disabled = true; return; }
   if (!v.dates.length) { box.innerHTML = '<div class="warnbox">The end date is before the start date.</div>'; go.disabled = true; return; }
   go.disabled = false;
-  const days = v.dates.reduce((a, d) => a + (v.part === 'FULL' || fullOnly(d) ? 1 : 0.5), 0);
+  const days = v.dates.reduce((a, d) => a + dayVal(d, v.part), 0);
   const conf = conflicts(me, v.dates, v.part), rules = ruleWarnings(me, v.type, v.dates, v.part), items = [];
   conf.forEach(c => items.push(`<b>${fmtShort(c.date)}</b>: ${c.others.map(o => esc(first(o.name))).join(' and ')} already away or on WFH${v.part === 'FULL' ? '' : ' (' + PARTS[v.part].toLowerCase() + ')'}${c.over ? ' (over the limit)' : ''}. Max 1 person per department on leave or WFH.`));
   rules.forEach(r => items.push(esc(r)));
-  box.innerHTML = (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">${notifyLine(me)} will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
+  const skipped = []; if (v.toRaw && v.toRaw !== v.from) for (let d = parse(v.from), e = parse(v.toRaw), n = 0; d <= e && n < 120; d = new Date(d.getTime() + 864e5), n++) { const k = ymd(d); if (phOf(k) && d.getDay() % 6) skipped.push(`${fmtShort(k)} ${phOf(k).name}`); }
+  const phNote = skipped.length ? `<div class="okbox" style="margin-top:8px">Public holiday${skipped.length > 1 ? 's' : ''} not counted: ${esc(skipped.join(', '))}.</div>` : '';
+  box.innerHTML = phNote + (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">${notifyLine(me)} will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
     : `<div class="okbox">No clashes. ${daysText(days)}${v.part === 'FULL' ? '' : ' · ' + PARTS[v.part]} · ${notifyLine(me)} will be notified.</div>`);
   go.textContent = items.length ? 'Apply anyway' : v.dates.length > 1 ? `Apply ${v.dates.length} days` : v.part !== 'FULL' ? `Apply ${PARTS[v.part]}` : 'Apply leave';
 }
@@ -667,7 +689,7 @@ function submitLeave() {
   save(); closeSheet(); render();
   const m = mgrs.find(x => x.id === me.approver && x.email) || mgrs.find(x => x.email);
   if (!mgrs.length) return toast('Saved. There is no other manager to notify.');
-  const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)}${v.part === 'FULL' ? '' : ', ' + PARTS[v.part]} (${daysText(v.dates.length * (v.part === 'FULL' ? 1 : 0.5))}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
+  const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)}${v.part === 'FULL' ? '' : ', ' + PARTS[v.part]} (${daysText(v.dates.reduce((a, d) => a + dayVal(d, v.part), 0))}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
   toast(`Sent for approval. ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
 }
 function closeSheet() { $('#overlay').classList.remove('on'); $('#overlay').innerHTML = ''; sheet = null; }
@@ -746,6 +768,7 @@ document.addEventListener('click', e => {
     }
     case 'bell': { const n = $('#notes'); if (n) n.scrollIntoView({behavior: 'smooth'}); break; }
     case 'ph-add': { const d = $('#phd').value; if (d && isAdmin(me)) { db.ph = (db.ph || []).filter(x => x.d !== d).concat({d, name: $('#phn').value.trim() || 'Public holiday'}); save(); render(); } break; }
+    case 'ph-refresh': fetchMomPH(true).then(ok => { render(); toast(ok ? 'Public holidays updated from MOM.' : 'Couldn’t reach MOM’s list. The saved list is still used.'); }); break;
     case 'ph-del': db.ph = (db.ph || []).filter(x => x.d !== el.dataset.d); save(); render(); break;
     case 'er-add': { const d = $('#erd').value; if (d && isAdmin(me)) { db.early = (db.early || []).filter(x => x.d !== d).concat({d, note: $('#ern').value.trim() || 'Early release'}); save(); render(); } break; }
     case 'er-del': db.early = (db.early || []).filter(x => x.d !== el.dataset.d); save(); render(); break;
@@ -792,6 +815,7 @@ window.addEventListener('storage', e => {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && cur()) { db = load(); render(); } });
 
 render();
+fetchMomPH(false);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
