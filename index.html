@@ -94,7 +94,9 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 .chip i{font-style:normal;overflow:hidden;text-overflow:ellipsis}
 .chip b{font-weight:700;opacity:.7}
 .t-AL{background:var(--sage)} .t-MC{background:var(--slate)} .t-TR{background:var(--sand)}
-.t-CCL,.t-BDL,.t-ML,.t-HL,.t-X{background:var(--stone)}
+.t-CCL,.t-BDL,.t-ML,.t-HL,.t-UL,.t-UPL,.t-X{background:var(--stone)}
+.phl{font-style:normal;font-size:.68rem;font-weight:700;color:var(--accent-ink);background:var(--accent-soft);border-radius:6px;padding:0 5px;margin-left:4px}
+.policy li{margin:6px 0}
 .t-WFH{background:transparent;border:1px dashed var(--mute)}
 .more{font-size:.75rem;color:var(--mute)}
 @media(max-width:640px){
@@ -120,6 +122,8 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 .note.warn{border-color:var(--sand)} .note.alert{border-color:var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0}
 .note.unread .t{font-weight:700}
 .note .m{font-size:.8rem;color:var(--mute)}
+.note.click{cursor:pointer} .note.click:hover{background:var(--stone)}
+.sr{position:absolute;left:-9999px}
 .steps{margin:12px 0;padding-left:22px}.steps li{margin:6px 0}
 .tag{display:inline-block;background:var(--accent);color:#1F1D1A;font-size:.72rem;font-weight:700;border-radius:99px;padding:0 9px;margin-right:8px;vertical-align:1px}
 .tag.fyi{background:var(--stone);font-weight:600}
@@ -169,10 +173,11 @@ const KEY = 'allins-leave-v2';
 const TYPES = {
   AL:{name:'Annual Leave',code:'AL'}, MC:{name:'Medical Leave',code:'MC'}, TR:{name:'Training',code:'TR'},
   CCL:{name:'Child Care Leave',code:'CCL'}, BDL:{name:'Birthday Leave',code:'BDL'}, ML:{name:'Maternity Leave',code:'ML'},
-  WFH:{name:'Work From Home',code:'WFH'}, HL:{name:'Hospital Leave',code:'HL'}
+  WFH:{name:'Work From Home',code:'WFH'}, HL:{name:'Hospital Leave',code:'HL'},
+  UL:{name:'Urgent Leave',code:'UL'}, UPL:{name:'Unpaid Leave',code:'UPL'}
 };
 const BAL = ['AL','CCL','BDL','ML','WFH','HL','MC'];     // cards shown on the balance panel
-const OTHER = ['CCL','BDL','ML','WFH','HL'];             // extra choices in the apply sheet
+const OTHER = ['CCL','BDL','ML','WFH','HL','UL','UPL'];             // extra choices in the apply sheet
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 /* ---------- tiny helpers ---------- */
@@ -189,7 +194,11 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const num = n => (Math.round(n * 2) / 2).toString();
 const PARTS = {FULL: 'Full day', AM: 'Half day AM', PM: 'Half day PM'};
 const partOf = l => l.part || 'FULL';                                  // older records have no part: full day
-const valOf = l => partOf(l) === 'FULL' ? 1 : 0.5;
+const phOf = d => (db.ph || []).find(x => x.d === d);
+const isEarly = d => (db.early || []).some(x => x.d === d);
+const fullOnly = d => !!d && (parse(d).getDay() === 6 || isEarly(d));      // Saturday duty and early-release days always count as a full day
+const valOf = l => (partOf(l) === 'FULL' || fullOnly(l.date)) ? 1 : 0.5;
+const weekKey = d => { const x = parse(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return ymd(x); };   // Monday of that week
 const covers = (part, half) => part === 'FULL' || part === half;      // does this part include the AM / PM half?
 const overlap = (a, b) => a === 'FULL' || b === 'FULL' || a === b;
 const daysText = n => n === 1 ? '1 day' : `${num(n)} days`;
@@ -197,6 +206,11 @@ const rangeText = ds => ds.length === 1 ? fmtShort(ds[0]) : `${fmtShort(ds[0])} 
 
 /* ---------- storage (local-first; swap load/save for a server later) ---------- */
 const JOEY_APPROVES = ['Belle', 'Violet', 'Shayne'];     // Joey Tay approves these three; everyone else is approved by Belle
+function defaultPH() {      // Singapore public holidays (MOM). The administrator can edit this list.
+  const L = [['2026-12-25','Christmas Day'],['2027-01-01','New Year’s Day'],['2027-02-06','Chinese New Year'],['2027-02-08','Chinese New Year (observed)'],['2027-03-10','Hari Raya Puasa'],['2027-03-26','Good Friday'],
+    ['2027-05-01','Labour Day'],['2027-05-17','Hari Raya Haji'],['2027-05-20','Vesak Day'],['2027-08-09','National Day'],['2027-10-28','Deepavali'],['2027-12-25','Christmas Day']];
+  return L.map(([d, name]) => ({d, name}));
+}
 function seed() {
   const ent = o => ({AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14, ...o});
   const mk = (id, name, dept, role, approver) => ({id, name, dept, role, approver, email:'', pin:'', ent:ent(), bf:0, bmonth:0});
@@ -204,8 +218,9 @@ function seed() {
   const rows = [['p1','Belle','Sales','manager'], ['p2','Wyonna','Sales'], ['p3','Jia Liang','Sales'], ['p4','Serene','Sales'],
     ['p5','Lena','Ops'], ['p6','Zhi Shan','Ops'], ['p7','Coco','Ops'], ['p8','Shayne','Ops'],
     ['p9','Violet','Accounts'], ['p10','Joey Chan','Accounts'], ['p11','Joey Tay','Management','manager']];
-  return {v:5, depts:['Sales','Ops','Accounts','Management'], leaves:[], notes:[],
-    people: rows.map(([id, name, dept, role]) => mk(id, name, dept, role || 'staff', A(name)))};
+  const admin = {id:'p0', name:'Admin', dept:'Admin', role:'admin', approver:'', email:'', pin:'', ent:ent(), bf:0, bmonth:0};
+  return {v:7, ph: defaultPH(), early: [], depts:['Sales','Ops','Accounts','Management'], leaves:[], notes:[],
+    people: [admin, ...rows.map(([id, name, dept, role]) => mk(id, name, dept, role || 'staff', A(name)))]};
 }
 function migrate(d) {
   const byName = n => d.people.find(p => p.name === n);
@@ -224,7 +239,11 @@ function migrate(d) {
       ent: {AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14}, bf: 0, bmonth: 0});
     (d.notes || []).forEach(n => { ['text', 'detail'].forEach(k => { n[k] = String(n[k] || '').split('Joey Chan').join('Joey Tay').split('Joey Tay (Accounts)').join('Joey Tay (Management)'); }); });
   }
-  d.v = 5; return d;
+  if ((d.v || 0) < 6 && !d.people.some(p => p.role === 'admin'))      // v6: an Admin user who can change approving managers
+    d.people.push({id: d.people.some(p => p.id === 'p0') ? uid() : 'p0', name: 'Admin', dept: 'Admin', role: 'admin', approver: '', email: '', pin: '', ent: {AL:0, CCL:0, BDL:0, ML:0, WFH:0, HL:0, MC:0}, bf: 0, bmonth: 0});
+  if (!Array.isArray(d.ph)) d.ph = defaultPH();
+  if (!Array.isArray(d.early)) d.early = [];
+  d.v = 7; return d;
 }
 function load() {
   try {
@@ -265,6 +284,8 @@ function alertCheck() {                        // tell a signed-in manager about
 }
 const cur = () => db.people.find(p => p.id === ui.me) || null;
 const isMgr = p => p && p.role === 'manager';
+const isAdmin = p => p && p.role === 'admin';
+const staffOf = () => db.people.filter(p => !isAdmin(p));
 
 /* ---------- domain logic ---------- */
 function balances(p, now = new Date()) {
@@ -282,7 +303,7 @@ const awayOn = (date, dept) => db.leaves     // dept '*' = everyone in the compa
   .filter(l => l.date === date).map(l => ({l, p: db.people.find(p => p.id === l.pid)}))
   .filter(x => x.p && (dept === '*' || x.p.dept === dept))
   .sort((a, b) => a.p.name.localeCompare(b.p.name));
-const countsAway = x => x.l.type !== 'WFH';           // working from home is not "away"
+const countsAway = x => true;                         // department quota: max 1 person on leave or WFH per day
 function expand(start, end) {
   if (!start) return [];
   if (!end || end === start) return [start];
@@ -304,12 +325,29 @@ function conflicts(me, dates, part = 'FULL') {
 function ruleWarnings(me, type, dates, part = 'FULL') {
   const w = [], today = new Date(); today.setHours(0,0,0,0);
   if (!dates.length) return w;
-  const days = dates.length * (part === 'FULL' ? 1 : 0.5);
+  const days = dates.reduce((a, d) => a + (part === 'FULL' || fullOnly(d) ? 1 : 0.5), 0);
   if (type === 'AL') {
     if ((parse(dates[0]) - today) / 864e5 < 7) w.push('Annual leave needs at least 1 week’s notice.');
     const lim = new Date(today); lim.setMonth(lim.getMonth() + 3);
     if (parse(dates[dates.length-1]) > lim) w.push('Annual leave can’t be applied more than 3 months in advance.');
   }
+  if (type === 'UL' || type === 'UPL') w.push('Urgent and unpaid leave are approved case by case by your approving manager.');
+  if (type === 'WFH') {
+    if (me.confirmed === false) w.push('Work from home is for confirmed staff only.');
+    if ((parse(dates[0]) - today) / 864e5 < 3) w.push('WFH must be updated at least 3 days in advance.');
+    const weeks = {}; dates.forEach(d => { weeks[weekKey(d)] = (weeks[weekKey(d)] || 0) + 1; });
+    Object.keys(weeks).forEach(wk => {
+      const have = db.leaves.filter(l => l.pid === me.id && l.type === 'WFH' && weekKey(l.date) === wk && !dates.includes(l.date)).length;
+      if (have + weeks[wk] > 1) w.push(`Only 1 WFH day per week (week of ${fmtShort(wk)}).`);
+      (db.ph || []).filter(x => weekKey(x.d) === wk).forEach(x => w.push(`WFH is not allowed in a week with a public holiday (${x.name}, ${fmtShort(x.d)}).`));
+    });
+    dates.forEach(d => db.leaves.filter(l => l.pid === me.id && l.type !== 'WFH' && l.type !== 'TR' && l.date === d).forEach(l => {
+      const len = l.batch ? db.leaves.filter(x => x.pid === me.id && x.batch === l.batch).length : 1;
+      w.push(len > 1 ? `${fmtShort(d)}: you are on leave for more than 1 day, so WFH needs special approval from management.` : `${fmtShort(d)}: you are on 1 day of leave. WFH is allowed only if the handover is done properly and completed on time.`);
+    }));
+  } else if (type !== 'TR' && dates.length > 1 && dates.some(d => db.leaves.some(l => l.pid === me.id && l.type === 'WFH' && l.date === d)))
+    w.push('You have WFH on a day in this multi-day leave. WFH is not allowed on leave of more than 1 day unless management gives special approval.');
+  dates.forEach(d => { if (parse(d).getDay() === 6) w.push(`${fmtShort(d)} is a Saturday duty: it counts as 1 full day.`); else if (isEarly(d)) w.push(`${fmtShort(d)} is an early-release day: leave counts as 1 full day.`); });
   if (BAL.includes(type) && type !== 'WFH') {
     const b = balances(me)[type];
     if (b.ent === 0 && type !== 'AL') w.push(`You have no ${TYPES[type].name} entitlement set.`);
@@ -322,13 +360,13 @@ const managersFor = actor => db.people.filter(p => isMgr(p) && p.id !== actor.id
 function pushNote(actor, to, text, detail, level, extra) {
   db.notes.unshift(Object.assign({id: uid(), to: to.id, from: actor.id, ts: Date.now(), read: false, level: level || 'info', text, detail: detail || '', tag: actor.approver === to.id ? 'approval' : 'fyi'}, extra || {}));
 }
-function notifyManagers(me, type, dates, conf, part = 'FULL', batch = '') {
+function notifyManagers(me, type, dates, conf, part = 'FULL', batch = '', rules = []) {
   const mgrs = managersFor(me);
   const over = conf.filter(c => c.over), any = conf.length > 0;
-  const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)}${part === 'FULL' ? '' : ', ' + PARTS[part]} (${daysText(dates.length * (part === 'FULL' ? 1 : 0.5))})`;
+  const text = `${me.name} (${me.dept}) applied for ${TYPES[type].name}, ${rangeText(dates)}${part === 'FULL' ? '' : ', ' + PARTS[part]} (${daysText(dates.reduce((a, d) => a + (part === 'FULL' || fullOnly(d) ? 1 : 0.5), 0))})`;
   const list = cs => cs.map(c => `${fmtShort(c.date)}: ${c.others.map(o => first(o.name)).join(', ')} already away`).join('; ');
-  const detail = over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '';
-  mgrs.forEach(m => pushNote(me, m, text, detail, over.length ? 'alert' : any ? 'warn' : 'info', {batch}));
+  const detail = [over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '', rules.length ? 'Policy: ' + rules.join(' ') : ''].filter(Boolean).join('. ');
+  mgrs.forEach(m => pushNote(me, m, text, detail, over.length ? 'alert' : (any || rules.length) ? 'warn' : 'info', {batch}));
   return mgrs;
 }
 function notifyTeam(me, text) { managersFor(me).forEach(m => pushNote(me, m, text, '', 'info')); }   // roster / entitlement changes
@@ -346,13 +384,13 @@ function decide(batch, ok) {
   db.notes.filter(n => n.batch === batch).forEach(n => { n.outcome = ok ? 'approved' : 'declined'; n.by = me.name; if (n.to === me.id) n.read = true; });
   if (ok) {
     ents.forEach(e => { e.status = 'approved'; e.decidedBy = me.id; });
-    db.people.filter(p => p.id !== me.id).forEach(p =>        // every employee is told
+    db.people.filter(p => p.id !== me.id && !isAdmin(p)).forEach(p =>        // every employee is told
       pushNote(me, p, p.id === who.id ? `Your ${desc} was approved by ${me.name}` : `${who.name} (${who.dept}): ${desc} approved by ${me.name}`, '', 'info', {tag: 'approved'}));
   } else {
     db.leaves = db.leaves.filter(l => l.batch !== batch);
     pushNote(me, who, `Your ${desc} was declined by ${me.name}`, '', 'info', {tag: 'declined'});
   }
-  save(); render(); toast(ok ? `Approved. Everyone has been notified.` : `Declined. ${first(who.name)} has been notified.`);
+  save(); closeSheet(); render(); toast(ok ? `Approved. Everyone has been notified.` : `Declined. ${first(who.name)} has been notified.`);
 }
 async function hashPin(pin, id) {
   const data = new TextEncoder().encode(id + ':' + pin);
@@ -367,8 +405,8 @@ async function hashPin(pin, id) {
 function render() {
   const me = cur();
   if (!me) { ui.me = null; sessionStorage.removeItem('allins-me'); $('#app').innerHTML = loginHTML(); setBadge(0); return; }
-  if (!ui.dept || (ui.dept !== '*' && !db.depts.includes(ui.dept))) ui.dept = me.dept;
-  $('#app').innerHTML = headerHTML(me) + (ui.view === 'team' && isMgr(me) ? teamHTML() : homeHTML(me));
+  if (!ui.dept || (ui.dept !== '*' && !db.depts.includes(ui.dept))) ui.dept = isAdmin(me) ? '*' : me.dept;
+  $('#app').innerHTML = headerHTML(me) + (ui.view === 'team' && (isMgr(me) || isAdmin(me)) ? teamHTML() : homeHTML(me));
   alertCheck();
 }
 const LOGO = '<svg viewBox="0 0 24 24" fill="none" stroke="#1F1D1A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg>';
@@ -378,14 +416,15 @@ function loginHTML() {
   const brand = `<div class="brand" style="margin-bottom:18px"><span class="logo">${LOGO}</span><div><b>ALL INS</b><small>Leave Tracker</small></div></div>`;
   if (!p) {
     const groups = db.depts.map(d => {
-      const ms = db.people.filter(x => x.dept === d).sort((a, b) => isMgr(b) - isMgr(a));
+      const ms = db.people.filter(x => x.dept === d && !isAdmin(x)).sort((a, b) => isMgr(b) - isMgr(a));
       if (!ms.length) return '';
       return `<div class="dept-h">${esc(d)}</div><div class="people">${ms.map(x => `<button class="person" data-a="pick" data-id="${x.id}"><span>${esc(x.name)}</span><small>${isMgr(x) ? 'Manager' : ''}</small></button>`).join('')}</div>`;
     }).join('');
-    return `<div class="login">${brand}<div class="card"><h2>Who are you?</h2><div class="sub">Select your name. Your leave balance is shown only to you, after you enter your PIN.</div>${groups}</div></div>`;
+    const adm = db.people.filter(isAdmin).map(x => `<button class="person" data-a="pick" data-id="${x.id}"><span>${esc(x.name)}</span><small>Administrator</small></button>`).join('');
+    return `<div class="login">${brand}<div class="card"><h2>Who are you?</h2><div class="sub">Select your name. Your leave balance is shown only to you, after you enter your PIN.</div>${groups}${adm ? `<div class="dept-h">Administration</div><div class="people">${adm}</div>` : ''}</div></div>`;
   }
   const creating = !p.pin;
-  return `<div class="login">${brand}<form class="card" data-form="pin"><h2>${esc(p.name)}</h2><div class="sub">${esc(p.dept)}${isMgr(p) ? ' · Manager' : ''}</div>
+  return `<div class="login">${brand}<form class="card" data-form="pin"><h2>${esc(p.name)}</h2><div class="sub">${isAdmin(p) ? 'Administrator' : esc(p.dept) + (isMgr(p) ? ' · Manager' : '')}</div>
     <label class="f" for="pin">${creating ? 'Create a PIN (4 to 8 digits)' : 'Enter your PIN'}</label>
     <input id="pin" type="password" inputmode="numeric" autocomplete="${creating ? 'new-password' : 'current-password'}" pattern="[0-9]{4,8}" maxlength="8" required autofocus>
     ${creating ? '<label class="f" for="pin2">Confirm PIN</label><input id="pin2" type="password" inputmode="numeric" maxlength="8" required>' : ''}
@@ -404,14 +443,28 @@ function headerHTML(me) {
   const unread = db.notes.filter(n => n.to === me.id && !n.read).length;
   return `<div class="top"><div class="brand"><span class="logo">${LOGO}</span><div><b>ALL INS</b><small>Leave Tracker</small></div></div>
     <div class="grow"></div>
-    <div style="font-weight:600">${esc(me.name)}<span class="chipdept">${esc(me.dept)}${isMgr(me) ? ' · Manager' : ''}</span></div>
-    <button class="btn bell" data-a="bell" aria-label="Notifications, ${unread} unread">Alerts${unread ? `<span class="n">${unread}</span>` : ''}</button>
-    ${isMgr(me) ? `<button class="btn" data-a="view" data-v="${ui.view === 'team' ? 'home' : 'team'}">${ui.view === 'team' ? 'Calendar' : 'Team'}</button>` : ''}
+    <div style="font-weight:600">${esc(me.name)}<span class="chipdept">${isAdmin(me) ? 'Administrator' : esc(me.dept) + (isMgr(me) ? ' · Manager' : '')}</span></div>
+    ${isAdmin(me) ? '' : `<button class="btn bell" data-a="bell" aria-label="Notifications, ${unread} unread">Alerts${unread ? `<span class="n">${unread}</span>` : ''}</button>`}
+    ${isMgr(me) || isAdmin(me) ? `<button class="btn" data-a="view" data-v="${ui.view === 'team' ? 'home' : 'team'}">${ui.view === 'team' ? 'Calendar' : isAdmin(me) ? 'Admin' : 'Team'}</button>` : ''}
     <button class="btn ghost" data-a="logout">Switch user</button></div>`;
 }
 
+function policyHTML() {
+  return `<section class="card"><details><summary style="cursor:pointer;font-weight:700;font-size:1.1rem">Leave policy</summary><ul class="policy" style="padding-left:20px;margin:10px 0 0">
+    <li><b>Leave application:</b> at least 1 week’s notice, and not more than 3 months in advance.</li>
+    <li><b>Urgent / unpaid leave:</b> approved case by case by your approving manager.</li>
+    <li><b>WFH:</b> update at least 3 days in advance. 1 day per week for confirmed staff. Not allowed in a week with a public holiday.</li>
+    <li><b>WFH and leave:</b> on 1 day of leave you may WFH if the handover is done properly and on time. On leave of more than 1 day, WFH needs special approval from management.</li>
+    <li><b>Department quota:</b> maximum 1 person on leave or WFH per day.</li>
+    <li><b>Earning leave:</b> employees earn leave as they work through the year.</li>
+    <li><b>Forfeiture:</b> brought-forward annual leave is capped at 50% of the annual entitlement and must be used by 30 June of the following year. Anything unused is forfeited from 1 July.</li>
+    <li><b>Saturday duty</b> counts as 1 full day of leave.</li>
+    <li><b>Early release:</b> if the company approves early release and you are on leave, it counts as 1 full day of leave.</li></ul>
+    <div class="sub" style="margin-top:10px">The app flags any rule you may break when you apply, and your approving manager sees the flags when deciding.</div></details></section>`;
+}
 function homeHTML(me) {
-  return balanceHTML(me) + notesHTML(me) + calendarHTML(me) + myLeaveHTML(me) +
+  if (isAdmin(me)) return calendarHTML(me) + '<div class="footer">Administrator view. The calendar is read-only; use Admin to manage approving managers and people.</div>' + policyHTML();
+  return balanceHTML(me) + notesHTML(me) + calendarHTML(me) + myLeaveHTML(me) + policyHTML() +
     '<div class="footer">Data is saved on this device. Each person’s balance is visible only after signing in with their own PIN.</div>';
 }
 
@@ -438,13 +491,42 @@ function noteState(n, me) {          // approve / decline buttons, or where the 
   if (n.outcome) return `<div class="x ok">${n.outcome === 'approved' ? 'Approved' : 'Declined'} by ${esc(n.by)}</div>`;
   const ents = db.leaves.filter(l => l.batch === n.batch);
   if (!ents.length) return '<div class="m">Cancelled by the applicant</div>';
-  if (n.tag === 'approval' && n.to === me.id) return `<div class="acts"><button class="btn primary" data-a="approve" data-b="${n.batch}">Approve</button><button class="btn" data-a="decline" data-b="${n.batch}">Decline</button></div>`;
+  if (n.tag === 'approval' && n.to === me.id) return `<div class="acts"><button class="btn primary" data-a="open-req" data-b="${n.batch}" data-n="${n.id}">Review and decide</button></div>`;
   const who = db.people.find(p => p.id === ents[0].pid), ap = who && db.people.find(p => p.id === who.approver);
-  return `<div class="m">Waiting for ${esc(ap ? ap.name : 'approval')}</div>`;
+  return `<div class="m">Waiting for ${esc(ap ? ap.name : 'approval')} · tap to view</div>`;
+}
+
+/* ---------- leave request detail (approver checks, then approves or declines) ---------- */
+function openRequest(batch, noteId) {
+  const me = cur(), ents = db.leaves.filter(l => l.batch === batch).sort((a, b) => a.date.localeCompare(b.date));
+  if (!ents.length) return toast('That request no longer exists. It was cancelled or already decided.');
+  const who = db.people.find(p => p.id === ents[0].pid); if (!who) return;
+  db.notes.filter(n => n.id === noteId || (n.batch === batch && n.to === me.id)).forEach(n => { if (n.to === me.id) n.read = true; }); save();
+  const dates = ents.map(e => e.date), part = partOf(ents[0]), type = ents[0].type, days = ents.reduce((a, l) => a + valOf(l), 0);
+  const ap = db.people.find(p => p.id === who.approver), mine = ap && ap.id === me.id, pend = ents.some(isPending);
+  const bal = BAL.includes(type) && type !== 'WFH' ? balances(who)[type] : null;
+  const conf = dates.map(d => {
+    const others = [...new Map(awayOn(d, who.dept).filter(x => x.p.id !== who.id && countsAway(x) && overlap(part, partOf(x.l))).map(x => [x.p.id, x])).values()];
+    return others.length ? {d, others} : null; }).filter(Boolean);
+  const row = (k, v) => `<div class="item"><div class="grow"><div class="sub" style="margin:0">${k}</div><b>${v}</b></div></div>`;
+  $('#overlay').innerHTML = `<div class="sheet" id="reqSheet"><h2>Leave request</h2>
+    <div class="sub">${esc(who.name)} · ${esc(who.dept)} · ${pend ? 'Awaiting approval' : 'Approved'}</div>
+    ${row('Type', TYPES[type].name + (part === 'FULL' ? '' : ' · ' + PARTS[part]))}
+    ${row('Dates', dates.length === 1 ? fmt(dates[0]) : `${fmt(dates[0])} to ${fmt(dates[dates.length - 1])}`)}
+    ${row('Length', daysText(days))}
+    ${bal ? row(TYPES[type].name + ' balance', `${num(bal.left + days)} days left before this request · ${num(bal.left)} after${bal.left < 0 ? ' (over balance)' : ''}`) : ''}
+    ${ents[0].note ? row('Remarks', esc(ents[0].note)) : ''}${ents[0].buddy ? row('Buddy', esc(ents[0].buddy)) : ''}
+    ${row('Applied', new Date(ents[0].created || Date.now()).toLocaleString('en-SG', {day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit'}))}
+    ${conf.length ? `<div class="warnbox" style="margin-top:12px"><b>Team clashes in ${esc(who.dept)} (leave or WFH)</b><ul>${conf.map(c => `<li><b>${fmtShort(c.d)}</b>: ${c.others.map(o => esc(first(o.p.name)) + (isPending(o.l) ? ' (pending)' : '')).join(' and ')} also away${c.others.length >= 2 ? ' (over the limit)' : ''}</li>`).join('')}</ul></div>` : '<div class="okbox">No one else from ' + esc(who.dept) + ' is away on these dates.</div>'}
+    ${(ents[0].flags || []).length ? `<div class="warnbox" style="margin-top:12px"><b>Policy flags</b><ul>${ents[0].flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
+    <div class="sub" style="margin-top:10px">Approving manager: <b>${esc(ap ? ap.name : 'none')}</b></div>
+    <div class="actions"><button type="button" class="btn" data-a="close">Close</button>${pend && mine ? `<button type="button" class="btn danger" data-a="decline" data-b="${batch}">Decline</button><button type="button" class="btn primary" data-a="approve" data-b="${batch}">Approve</button>` : pend ? `<span class="sub" style="align-self:center">Only ${esc(ap ? first(ap.name) : 'the approver')} can decide this.</span>` : ''}</div></div>`;
+  $('#overlay').classList.add('on'); render();
 }
 function notesHTML(me) {
   const mine = db.notes.filter(n => n.to === me.id).slice(0, 15), unread = mine.filter(n => !n.read).length;
-  const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'}"><div class="t">${noteTag(n)}${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}${noteState(n, me)}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
+  const live = n => n.batch && db.leaves.some(l => l.batch === n.batch);
+  const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'} ${live(n) ? 'click' : ''}" ${live(n) ? `data-a="open-req" data-b="${n.batch}" data-n="${n.id}" tabindex="0" role="button" aria-label="Review request: ${esc(n.text)}"` : ''}><div class="t">${noteTag(n)}${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}${noteState(n, me)}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
     : `<div class="sub" style="margin-top:10px">${isMgr(me) ? 'No leave applications yet. You’ll be notified here when someone applies.' : 'Nothing yet. You’ll be notified here when leave is approved.'}</div>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   const pushBtn = perm === 'default' ? '<button class="btn primary" data-a="enable-push">Turn on notifications</button>' : perm === 'granted' ? '<button class="btn" data-a="test-push">Send test</button>' : '';
@@ -470,15 +552,15 @@ function calendarHTML(me) {
       const show = isMgr(me) || p.id === me.id || ['AL','TR','WFH','BDL'].includes(l.type);
       return `<span class="chip ${show ? 't-' + l.type : 't-X'} ${isPending(l) ? 'pend' : ''}" title="${esc(p.name)} (${esc(p.dept)}): ${show ? TYPES[l.type].name : 'Away'}${isPending(l) ? ' (awaiting approval)' : ''}${partOf(l) === 'FULL' ? '' : ', ' + PARTS[partOf(l)]}"><i>${esc(first(p.name))}</i><b>${show ? l.type : 'Away'}${partOf(l) === 'FULL' ? '' : ' ' + partOf(l)}</b></span>`;
     }).join('') + (away.length > 3 ? `<span class="more">+${away.length - 3}</span>` : '');
-    const label = `${fmt(k)}. ${total ? total + ' away' : 'nobody away'}${n >= 2 ? ', over the limit in ' + worstDept : ''}`;
-    return `<button class="cell ${wk ? 'wk' : ''} ${k === todayKey ? 'today' : ''} ${n >= 2 ? 'over' : ''} ${mineHere ? 'mine' : ''}" data-a="day" data-d="${k}" aria-label="${esc(label)}"><span class="hd"><span class="d">${d.getDate()}</span>${n >= 2 ? `<em class="bdg" title="${esc(worstDept)}">${n}<span class="x"> away</span></em>` : ''}</span><span class="chips">${chips}</span></button>`;
+    const label = `${fmt(k)}${phOf(k) ? ', public holiday: ' + phOf(k).name : isEarly(k) ? ', early release' : ''}. ${total ? total + ' away' : 'nobody away'}${n >= 2 ? ', over the limit in ' + worstDept : ''}`;
+    return `<button class="cell ${wk ? 'wk' : ''} ${k === todayKey ? 'today' : ''} ${n >= 2 ? 'over' : ''} ${mineHere ? 'mine' : ''}" data-a="day" data-d="${k}" aria-label="${esc(label)}"><span class="hd"><span class="d">${d.getDate()}</span>${phOf(k) ? `<em class="phl" title="${esc(phOf(k).name)}">PH</em>` : isEarly(k) ? '<em class="phl" title="Early release">ER</em>' : ''}${n >= 2 ? `<em class="bdg" title="${esc(worstDept)}">${n}<span class="x"> away</span></em>` : ''}</span><span class="chips">${chips}</span></button>`;
   }).join('');
   const tabs = `<div class="tabs">${[...db.depts, '*'].map(d => `<button class="tab" aria-pressed="${d === dept}" data-a="dept" data-d="${esc(d)}">${d === '*' ? 'Everyone' : esc(d)}</button>`).join('')}</div>`;
   const legend = [['AL','sage'],['MC','slate'],['TR','sand'],['Other','stone']].map(([c,s]) => `<span><i class="sw" style="background:var(--${s})"></i>${c === 'AL' ? 'Annual' : c === 'MC' ? 'Medical' : c === 'TR' ? 'Training' : 'Other leave'}</span>`).join('') +
-    '<span><i class="sw" style="border:1px dashed var(--mute)"></i>Work from home</span><span><i class="sw" style="background:var(--stone);outline:2px dashed var(--ink);outline-offset:-2px"></i>Awaiting approval</span><span><i class="sw" style="background:var(--accent-soft);border:2px solid var(--accent)"></i>More than one away</span>';
+    '<span><i class="sw" style="border:1px dashed var(--mute)"></i>Work from home</span><span><i class="sw" style="background:var(--stone);outline:2px dashed var(--ink);outline-offset:-2px"></i>Awaiting approval</span><span><i class="sw" style="background:var(--accent-soft);border:2px solid var(--accent)"></i>More than one away</span><span><em class="phl" style="margin:0">PH</em>Public holiday</span><span><em class="phl" style="margin:0">ER</em>Early release</span>';
   return `<section class="card"><div class="cal-head"><button class="btn" data-a="month" data-n="-1" aria-label="Previous month">‹</button><h2>${MONTHS[mo]} ${y}</h2><button class="btn" data-a="month" data-n="1" aria-label="Next month">›</button>
     <button class="btn" data-a="today">Today</button><div class="grow"></div>${tabs}</div>
-    <div class="sub" style="margin-bottom:6px">${dept === '*' ? 'Everyone' : esc(dept) + ' department'}. See who is away, and tap a day to mark your own leave. The orange outline means more than one person from the same department is away.</div>
+    <div class="sub" style="margin-bottom:6px">${dept === '*' ? 'Everyone' : esc(dept) + ' department'}. See who is away${isAdmin(me) ? '.' : ', and tap a day to mark your own leave.'} The orange outline means more than one person from the same department is away or on WFH (maximum 1).</div>
     <div class="legend">${legend}</div>
     <div class="grid">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x => `<div class="dow">${x}</div>`).join('')}${body}</div></section>`;
 }
@@ -496,13 +578,26 @@ function teamHTML() {
     return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b> ${isMgr(p) ? '<span class="chipdept">Manager</span>' : ''}<div class="sub">Approver: ${esc((db.people.find(x => x.id === p.approver) || {name: 'none'}).name)} · ${p.email ? esc(p.email) : 'No email set'} · ${p.pin ? 'PIN set' : 'No PIN yet'}</div></div>${p.id !== ui.me ? `<button class="btn" data-a="reset-pin" data-id="${p.id}">Reset PIN</button>` : ''}<button class="btn" data-a="edit" data-id="${p.id}">Edit</button></div>`).join('');
   }).join('');
   const other = db.people.filter(m => isMgr(m) && m.id !== ui.me).map(m => esc(m.name)).join(' or ') || 'another manager';
-  const help = `<section class="card"><h2>How to reset a PIN</h2><div class="sub">For managers. Use this when someone forgets their PIN.</div>
+  const meP = cur(), admins = db.people.filter(isAdmin).filter(a => a.id !== ui.me);
+  const adminRows = admins.length ? `<div class="dept-h">Administration</div>` + admins.map(a => `<div class="item"><div class="grow"><b>${esc(a.name)}</b> <span class="chipdept">Administrator</span><div class="sub">${a.pin ? 'PIN set' : 'No PIN yet'}</div></div><button class="btn" data-a="reset-pin" data-id="${a.id}">Reset PIN</button></div>`).join('') : '';
+  const approverCard = isAdmin(meP) ? `<section class="card" id="approvers"><h2>Approving managers</h2><div class="sub">Choose who approves each person’s leave. Changing it moves any pending requests to the new approver and notifies the person and both managers.</div>` +
+    db.depts.map(d => {
+      const ms = db.people.filter(p => p.dept === d && !isAdmin(p)); if (!ms.length) return '';
+      return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b>${isMgr(p) ? ' <span class="chipdept">Manager</span>' : ''}</div><label class="sr" for="ap_${p.id}">Approving manager for ${esc(p.name)}</label><select id="ap_${p.id}" data-a="set-approver" data-id="${p.id}" style="width:auto;min-width:150px">${db.people.filter(m => isMgr(m) && m.id !== p.id).map(m => `<option value="${m.id}" ${p.approver === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>`).join('');
+    }).join('') + '</section>' : '';
+  const help = `<section class="card"><h2>How to reset a PIN</h2><div class="sub">For managers and the administrator. Use this when someone forgets their PIN.</div>
     <ol class="steps"><li>Open <b>Team</b> (top right of the home screen).</li>
     <li>Find the person in their department list and tap <b>Reset PIN</b>.</li>
     <li>Tap <b>OK</b> to confirm. Their old PIN stops working straight away.</li>
     <li>Tell them to pick their name on the sign-in screen and create a new PIN (4 to 8 digits).</li></ol>
-    <div class="okbox">Forgot your <b>own</b> PIN? Ask ${other} to reset it using the steps above. You can’t reset your own PIN.</div></section>`;
-  return help + `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}</section>
+    <div class="okbox">Forgot your <b>own</b> PIN? Ask ${isAdmin(meP) ? 'a manager' : other} to reset it using the steps above. You can’t reset your own PIN.</div></section>`;
+  const dl = (arr, kind) => arr.slice().sort((a, b) => a.d.localeCompare(b.d)).map(x => `<div class="item"><div class="grow"><b>${fmt(x.d)} ${x.d.slice(0, 4)}</b> · ${esc(x.name || x.note || '')}</div><button class="btn ghost danger" data-a="${kind}-del" data-d="${x.d}">Remove</button></div>`).join('') || '<div class="sub">None yet.</div>';
+  const calCard = isAdmin(meP) ? `<section class="card"><h2>Public holidays and early release</h2><div class="sub">Public holidays block WFH for that week. Early-release days make any leave on that day count as 1 full day. Check the public holiday list against MOM’s calendar each year.</div>
+    <div class="dept-h">Public holidays</div>${dl(db.ph || [], 'ph')}
+    <div class="two" style="margin-top:10px"><div><label class="f" for="phd">Date</label><input type="date" id="phd"></div><div><label class="f" for="phn">Name</label><input type="text" id="phn" placeholder="e.g. Deepavali"></div></div><div class="actions"><button class="btn" data-a="ph-add">Add public holiday</button></div>
+    <div class="dept-h">Early release days</div>${dl(db.early || [], 'er')}
+    <div class="two" style="margin-top:10px"><div><label class="f" for="erd">Date</label><input type="date" id="erd"></div><div><label class="f" for="ern">Note</label><input type="text" id="ern" placeholder="e.g. CNY eve"></div></div><div class="actions"><button class="btn" data-a="er-add">Add early release day</button></div></section>` : '';
+  return approverCard + calCard + help + `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}${adminRows}</section>
     <section class="card"><h2>Backup</h2><div class="sub">Data lives on this device. Export a copy to keep it safe or move it to another device.</div><div class="actions"><button class="btn" data-a="export">Export data</button><label class="btn" style="cursor:pointer">Import data<input type="file" id="imp" accept="application/json" hidden></label></div></section>`;
 }
 
@@ -542,21 +637,21 @@ function sheetVals() {
   const f = $('#sheetForm'), r = f.querySelector('[name=type]:checked');
   const type = $('#other').value || (r ? r.value : 'AL');
   const from = $('#from').value, to = $('#to').value, multi = !!to && to !== from;
-  const part = multi ? 'FULL' : (f.querySelector('[name=part]:checked') || {value: 'FULL'}).value;   // several days are always full days
+  const part = multi || fullOnly(from) ? 'FULL' : (f.querySelector('[name=part]:checked') || {value: 'FULL'}).value;   // several days are always full days
   return {type, part, from, dates: expand(from, to), toRaw: to, buddy: $('#buddy').value, note: $('#note').value.trim()};
 }
 const notifyLine = me => managersFor(me).map(m => esc(m.name) + (m.id === me.approver ? ' (approver)' : '')).join(' and ') || 'No one';
 function updSheet() {
   const me = cur(), v = sheetVals(), box = $('#warn'), go = $('#go');
-  const multi = !!v.toRaw && v.toRaw !== v.from;       // more than one day: half days are switched off
-  $('#sheetForm').querySelectorAll('[name=part]').forEach(r => { r.disabled = multi; if (multi) r.checked = r.value === 'FULL'; });
-  $('#partHint').textContent = multi ? 'Several days are taken as full days. Clear “To” to choose a half day.' : 'Half days are for a single day. To take several days, set a different “To” date.';
+  const multi = !!v.toRaw && v.toRaw !== v.from, fo = !multi && fullOnly(v.from);       // more than one day, Saturday or early release: half days are switched off
+  $('#sheetForm').querySelectorAll('[name=part]').forEach(r => { r.disabled = multi || fo; if (multi || fo) r.checked = r.value === 'FULL'; });
+  $('#partHint').textContent = fo ? (parse(v.from).getDay() === 6 ? 'Saturday duty counts as 1 full day.' : 'Early-release day: leave counts as 1 full day.') : multi ? 'Several days are taken as full days. Clear “To” to choose a half day.' : 'Half days are for a single day. To take several days, set a different “To” date.';
   if (!v.from) { box.innerHTML = '<div class="warnbox">Pick a start date.</div>'; go.disabled = true; return; }
   if (!v.dates.length) { box.innerHTML = '<div class="warnbox">The end date is before the start date.</div>'; go.disabled = true; return; }
   go.disabled = false;
-  const days = v.dates.length * (v.part === 'FULL' ? 1 : 0.5);
-  const conf = conflicts(me, v.dates, v.part).filter(c => v.type !== 'WFH'), rules = ruleWarnings(me, v.type, v.dates, v.part), items = [];
-  conf.forEach(c => items.push(`<b>${fmtShort(c.date)}</b>: ${c.others.map(o => esc(first(o.name))).join(' and ')} already away${v.part === 'FULL' ? '' : ' (' + PARTS[v.part].toLowerCase() + ')'}${c.over ? ' (over the limit)' : ''}. Max 1 person per department.`));
+  const days = v.dates.reduce((a, d) => a + (v.part === 'FULL' || fullOnly(d) ? 1 : 0.5), 0);
+  const conf = conflicts(me, v.dates, v.part), rules = ruleWarnings(me, v.type, v.dates, v.part), items = [];
+  conf.forEach(c => items.push(`<b>${fmtShort(c.date)}</b>: ${c.others.map(o => esc(first(o.name))).join(' and ')} already away or on WFH${v.part === 'FULL' ? '' : ' (' + PARTS[v.part].toLowerCase() + ')'}${c.over ? ' (over the limit)' : ''}. Max 1 person per department on leave or WFH.`));
   rules.forEach(r => items.push(esc(r)));
   box.innerHTML = (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">${notifyLine(me)} will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
     : `<div class="okbox">No clashes. ${daysText(days)}${v.part === 'FULL' ? '' : ' · ' + PARTS[v.part]} · ${notifyLine(me)} will be notified.</div>`);
@@ -564,11 +659,11 @@ function updSheet() {
 }
 function submitLeave() {
   const me = cur(), v = sheetVals(); if (!v.dates.length) return;
-  const conf = v.type === 'WFH' ? [] : conflicts(me, v.dates, v.part), batch = uid();
+  const conf = conflicts(me, v.dates, v.part), batch = uid(), rules = ruleWarnings(me, v.type, v.dates, v.part);
   // replace anything of mine that overlaps: a full day replaces both halves, AM replaces AM/full, PM replaces PM/full
   db.leaves = db.leaves.filter(l => !(l.pid === me.id && v.dates.includes(l.date) && overlap(v.part, partOf(l))));
-  v.dates.forEach(d => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, part: v.part, status: 'pending', buddy: v.buddy, note: v.note, batch, created: Date.now()}));
-  const mgrs = notifyManagers(me, v.type, v.dates, conf, v.part, batch);
+  v.dates.forEach((d, i) => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, part: v.part, status: 'pending', buddy: v.buddy, note: v.note, batch, created: Date.now(), flags: i === 0 ? rules : undefined}));
+  const mgrs = notifyManagers(me, v.type, v.dates, conf, v.part, batch, rules);
   save(); closeSheet(); render();
   const m = mgrs.find(x => x.id === me.approver && x.email) || mgrs.find(x => x.email);
   if (!mgrs.length) return toast('Saved. There is no other manager to notify.');
@@ -577,7 +672,21 @@ function submitLeave() {
 }
 function closeSheet() { $('#overlay').classList.remove('on'); $('#overlay').innerHTML = ''; sheet = null; }
 
+/* ---------- admin: change approving manager ---------- */
+function setApprover(pid, newId) {
+  const admin = cur(), p = db.people.find(x => x.id === pid), to = db.people.find(x => x.id === newId);
+  if (!isAdmin(admin) || !p || !to || !isMgr(to) || to.id === p.id || p.approver === newId) return render();
+  const from = db.people.find(x => x.id === p.approver); p.approver = newId;
+  const batches = new Set(db.leaves.filter(l => l.pid === pid && isPending(l)).map(l => l.batch));    // pending requests move to the new approver
+  db.notes.filter(n => batches.has(n.batch) && !n.outcome).forEach(n => { if (n.to === newId) n.tag = 'approval'; else if (from && n.to === from.id) n.tag = 'fyi'; });
+  const text = `${admin.name} changed ${p.name}’s approving manager${from ? ' from ' + from.name : ''} to ${to.name}`;
+  const detail = batches.size ? `${batches.size} pending request${batches.size > 1 ? 's' : ''} moved to ${to.name} for approval` : '';
+  [...new Set([p.id, to.id, from && from.id].filter(Boolean))].forEach(id => { const r = db.people.find(x => x.id === id); if (r) pushNote(admin, r, text, id === to.id ? detail : '', 'info', {tag: 'fyi'}); });
+  save(); render(); toast(`${p.name}’s leave is now approved by ${to.name}.`);
+}
+
 /* ---------- team editor ---------- */
+const defaultApprover = self => { const b = db.people.find(p => p.name === 'Belle' && isMgr(p)) || db.people.find(p => isMgr(p) && p.id !== self); return b ? b.id : ''; };
 function openPerson(id) {
   const p = id ? db.people.find(x => x.id === id) : {id: '', name: '', dept: db.depts[0] || '', role: 'staff', email: '', ent: {AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14}, bf: 0, bmonth: 0};
   const E = t => `<div><label class="f" for="e_${t}">${TYPES[t].name}</label><input type="number" id="e_${t}" min="0" step="0.5" value="${p.ent[t] ?? 0}"></div>`;
@@ -585,7 +694,9 @@ function openPerson(id) {
     <label class="f" for="pn">Name</label><input type="text" id="pn" value="${esc(p.name)}" required>
     <div class="two"><div><label class="f" for="pd">Department</label><input type="text" id="pd" list="dl" value="${esc(p.dept)}" required><datalist id="dl">${db.depts.map(d => `<option>${esc(d)}</option>`).join('')}</datalist></div>
     <div><label class="f" for="pr">Role</label><select id="pr"><option value="staff" ${p.role === 'staff' ? 'selected' : ''}>Staff</option><option value="manager" ${p.role === 'manager' ? 'selected' : ''}>Manager</option></select></div></div>
-    <label class="f" for="pa">Approving manager</label><select id="pa">${db.people.filter(m => isMgr(m) && m.id !== id).map(m => `<option value="${m.id}" ${p.approver === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+    ${isAdmin(cur()) ? `<label class="f" for="pa">Approving manager</label><select id="pa">${db.people.filter(m => isMgr(m) && m.id !== id).map(m => `<option value="${m.id}" ${p.approver === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>`
+      : `<div class="sub" style="margin-top:12px">Approving manager: <b>${esc((db.people.find(x => x.id === p.approver) || {name: 'Belle (default)'}).name)}</b>. Only the administrator can change this.</div>`}
+    <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pc" style="width:auto" ${p.confirmed === false ? '' : 'checked'}> Confirmed staff (eligible for work from home)</label>
     <label class="f" for="pe">Email (for “Also email” on notifications)</label><input type="email" id="pe" value="${esc(p.email)}">
     <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}"></div>
     <div><label class="f" for="pm">Birthday month</label><select id="pm"><option value="0">Not set</option>${MONTHS.map((m, i) => `<option value="${i+1}" ${p.bmonth === i+1 ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
@@ -599,7 +710,7 @@ function openPerson(id) {
     const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
     const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
     const rec = id ? db.people.find(x => x.id === id) : {id: uid(), pin: ''};
-    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa').value || rec.approver || '', email: $('#pe').value.trim(), ent, bf, bmonth: Number($('#pm').value)});
+    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver || defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, bmonth: Number($('#pm').value)});
     if (!id) db.people.push(rec);
     notifyTeam(cur(), id ? `${cur().name} updated ${name}’s details or entitlements` : `${cur().name} added ${name} to ${dept}`);
     if (!db.depts.includes(dept)) db.depts.push(dept);
@@ -626,7 +737,7 @@ document.addEventListener('click', e => {
     case 'month': ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.n), 1); render(); break;
     case 'today': { const n = new Date(); ui.month = new Date(n.getFullYear(), n.getMonth(), 1); render(); break; }
     case 'dept': ui.dept = el.dataset.d; render(); break;
-    case 'day': openSheet(el.dataset.d); break;
+    case 'day': if (isAdmin(me)) toast('The administrator account doesn’t take leave.'); else openSheet(el.dataset.d); break;
     case 'close': closeSheet(); break;
     case 'del': case 'del-sheet': {
       const gone = db.leaves.find(l => l.id === id); db.leaves = db.leaves.filter(l => l.id !== id);
@@ -634,6 +745,11 @@ document.addEventListener('click', e => {
       save(); if (a === 'del-sheet') closeSheet(); render(); break;
     }
     case 'bell': { const n = $('#notes'); if (n) n.scrollIntoView({behavior: 'smooth'}); break; }
+    case 'ph-add': { const d = $('#phd').value; if (d && isAdmin(me)) { db.ph = (db.ph || []).filter(x => x.d !== d).concat({d, name: $('#phn').value.trim() || 'Public holiday'}); save(); render(); } break; }
+    case 'ph-del': db.ph = (db.ph || []).filter(x => x.d !== el.dataset.d); save(); render(); break;
+    case 'er-add': { const d = $('#erd').value; if (d && isAdmin(me)) { db.early = (db.early || []).filter(x => x.d !== d).concat({d, note: $('#ern').value.trim() || 'Early release'}); save(); render(); } break; }
+    case 'er-del': db.early = (db.early || []).filter(x => x.d !== el.dataset.d); save(); render(); break;
+    case 'open-req': openRequest(el.dataset.b, el.dataset.n); break;
     case 'approve': case 'decline': decide(el.dataset.b, a === 'approve'); break;
     case 'read-all': db.notes.filter(n => n.to === me.id).forEach(n => n.read = true); save(); render(); break;
     case 'enable-push': Notification.requestPermission().then(r => { render(); if (r === 'granted') sysNotify('Notifications are on', 'You’ll be alerted here when a leave update comes in.', 'test'); }); break;
@@ -653,16 +769,18 @@ document.addEventListener('submit', async e => {
     if (pin !== $('#pin2').value) { ui.login.err = 'The two PINs don’t match.'; return render(); }
     p.pin = await hashPin(pin, p.id); save();
   } else if (p.pin !== await hashPin(pin, p.id)) { ui.login.err = 'That PIN is not right.'; return render(); }
-  ui.me = p.id; sessionStorage.setItem('allins-me', p.id); ui.login = {pid: null, err: ''}; ui.view = 'home'; ui.dept = p.dept; render();
+  ui.me = p.id; sessionStorage.setItem('allins-me', p.id); ui.login = {pid: null, err: ''}; ui.view = 'home'; ui.dept = isAdmin(p) ? '*' : p.dept; ui.view = isAdmin(p) ? 'team' : 'home'; render();
 });
 document.addEventListener('change', e => {
+  if (e.target.dataset && e.target.dataset.a === 'set-approver') return setApprover(e.target.dataset.id, e.target.value);
   if (e.target.id !== 'imp' || !e.target.files[0]) return;
   e.target.files[0].text().then(t => {
     try { const d = JSON.parse(t); if (!Array.isArray(d.people) || !Array.isArray(d.leaves)) throw 0; if (confirm('Replace all data on this device with this file?')) { db = d; save(); ui.me = null; sessionStorage.removeItem('allins-me'); render(); } }
     catch (x) { toast('That file isn’t a valid leave tracker backup.'); }
   });
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheet !== null || e.key === 'Escape' && $('#overlay').classList.contains('on')) closeSheet(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.matches && e.target.matches('.note.click')) { openRequest(e.target.dataset.b, e.target.dataset.n); return; } if (e.key === 'Escape' && sheet !== null || e.key === 'Escape' && $('#overlay').classList.contains('on')) closeSheet(); });
 
 /* another tab or window on this device changed the data: refresh, and alertCheck() inside render() raises the notification */
 window.addEventListener('storage', e => {
