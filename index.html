@@ -1,11 +1,549 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hello, World</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ALL INS Leave Tracker</title>
+<meta name="theme-color" content="#F4F2EE">
+<meta name="description" content="Leave tracker for ALL INS: balances, department calendar and manager notifications.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Leave Tracker">
+<style>
+:root{
+  --bg:#F4F2EE; --card:#FFFFFF; --ink:#2A2926; --mute:#6E6962; --line:#E3DFD7;
+  --accent:#E8710A; --accent-ink:#B84F00; --accent-soft:#FDEBDB;
+  --sage:#BCC9B7; --slate:#B5C2CF; --sand:#E2D6BD; --stone:#D9D5CD; --wash:#FAF9F6;
+  --r:18px;
+}
+*{box-sizing:border-box}
+html{font-size:18px;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 16px 80px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:18px}
+h2{font-size:1.2rem;margin:0 0 4px}
+.sub{color:var(--mute);font-size:.9rem}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.grow{flex:1}
+
+/* header */
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:44px;height:44px;border-radius:12px;background:var(--accent);display:grid;place-items:center}
+.logo svg{width:26px;height:26px}
+.brand b{display:block;font-size:1.15rem;line-height:1.1}
+.brand small{color:var(--mute);font-size:.8rem}
+.chipdept{display:inline-block;background:var(--stone);border-radius:99px;padding:2px 12px;font-size:.85rem;margin-left:6px}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px 16px;min-height:44px}
+.btn:hover{background:var(--wash)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1F1D1A;font-weight:700}
+.btn.primary:hover{filter:brightness(.95)}
+.btn.danger{color:var(--accent-ink)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--mute)}
+.bell{position:relative}
+.bell .n{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#1F1D1A;font-weight:700;font-size:.75rem;border-radius:99px;min-width:22px;height:22px;display:grid;place-items:center;padding:0 5px}
+
+/* login */
+.login{max-width:560px;margin:8vh auto 0}
+.people{display:grid;gap:10px;margin-top:12px}
+.person{display:flex;justify-content:space-between;align-items:center;text-align:left;width:100%;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.person:hover{border-color:var(--accent);background:var(--wash)}
+.person small{color:var(--mute)}
+.dept-h{margin:18px 0 0;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+input[type=text],input[type=password],input[type=email],input[type=date],input[type=number],select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card);min-height:46px}
+label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
+.err{color:var(--accent-ink);margin-top:10px;font-weight:600}
+
+/* balances */
+.bal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:14px}
+.bal{border:1px solid var(--line);border-radius:14px;padding:14px 16px;background:var(--wash)}
+.bal .l{font-size:.9rem;color:var(--mute)}
+.bal .v{font-size:2.4rem;font-weight:700;line-height:1.15;margin:2px 0}
+.bal .v.neg{color:var(--accent-ink)}
+.bal .s{font-size:.82rem;color:var(--mute)}
+.bal.hi{border-color:var(--accent);background:var(--accent-soft)}
+
+/* calendar */
+.cal-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.cal-head h2{margin:0 6px;min-width:11ch;text-align:center}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 14px}
+.tab[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.85rem;color:var(--mute);margin:4px 0 12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:14px;border-radius:4px;display:inline-block}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.dow{font-size:.8rem;color:var(--mute);text-align:center;padding:2px 0;text-transform:uppercase;letter-spacing:.06em}
+.cell{min-height:104px;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:6px;text-align:left;display:flex;flex-direction:column;gap:3px;position:relative;overflow:hidden}
+.cell.blank{border:none;background:transparent;pointer-events:none}
+.cell.wk{background:var(--wash)}
+.cell:hover:not(.blank){border-color:var(--accent)}
+.cell .d{font-weight:700;font-size:1rem}
+.cell.today .d{background:var(--accent);color:#1F1D1A;border-radius:99px;min-width:28px;height:28px;display:inline-grid;place-items:center;padding:0 4px}
+.cell.over{border:2px solid var(--accent);background:var(--accent-soft)}
+.cell.mine{box-shadow:inset 0 0 0 2px var(--ink)}
+.bdg{position:absolute;top:6px;right:6px;font-style:normal;font-size:.7rem;font-weight:700;background:var(--accent);color:#1F1D1A;border-radius:99px;padding:1px 8px}
+.chip{display:flex;align-items:center;gap:4px;border-radius:7px;padding:1px 6px;font-size:.78rem;line-height:1.35;overflow:hidden;white-space:nowrap}
+.chip i{font-style:normal;overflow:hidden;text-overflow:ellipsis}
+.chip b{font-weight:700;opacity:.7}
+.t-AL{background:var(--sage)} .t-MC{background:var(--slate)} .t-TR{background:var(--sand)}
+.t-CCL,.t-BDL,.t-ML,.t-HL,.t-X{background:var(--stone)}
+.t-WFH{background:transparent;border:1px dashed var(--mute)}
+.more{font-size:.75rem;color:var(--mute)}
+@media(max-width:640px){
+  html{font-size:17px}
+  .grid{gap:3px}
+  .cell{min-height:68px;padding:4px}
+  .cell .d{font-size:.9rem}
+  .chip{width:11px;height:11px;border-radius:50%;padding:0;display:inline-block}
+  .chip i,.chip b{display:none}
+  .cell .chips{display:flex;flex-wrap:wrap;gap:3px}
+  .bdg{font-size:.7rem;padding:0 7px;top:auto;bottom:4px;right:4px}
+  .bdg .x{display:none}
+  .bal-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  .bal{padding:12px}
+  .bal .v{font-size:2rem}
+}
+
+/* lists */
+.item{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.item:first-of-type{border-top:none}
+.pill{border-radius:8px;padding:2px 10px;font-size:.85rem;white-space:nowrap}
+.note{border-left:5px solid var(--line);padding:6px 0 6px 14px;margin:10px 0}
+.note.warn{border-color:var(--sand)} .note.alert{border-color:var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0}
+.note.unread .t{font-weight:700}
+.note .m{font-size:.8rem;color:var(--mute)}
+.note .x{font-size:.92rem;color:var(--accent-ink)}
+
+/* sheet */
+#overlay{position:fixed;inset:0;background:rgba(42,41,38,.45);display:none;align-items:flex-end;justify-content:center;z-index:50}
+#overlay.on{display:flex}
+.sheet{background:var(--card);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom))}
+@media(min-width:640px){#overlay{align-items:center}.sheet{border-radius:22px}}
+.sheet h2{font-size:1.35rem}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.seg label{position:relative;border:2px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;cursor:pointer;font-weight:600;font-size:.95rem}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg input:checked+span{display:block}
+.seg label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.seg label:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:2px}
+.warnbox{margin-top:14px;border-radius:12px;background:var(--accent-soft);border:1px solid var(--accent);padding:10px 14px;font-size:.92rem}
+.warnbox ul{margin:6px 0 0;padding-left:20px}
+.okbox{margin-top:14px;border-radius:12px;background:var(--wash);border:1px solid var(--line);padding:10px 14px;font-size:.92rem}
+.actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.actions .primary{flex:1}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:480px){.two{grid-template-columns:1fr}}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:14px;display:none;gap:14px;align-items:center;max-width:92vw;z-index:60;font-size:.95rem}
+#toast.on{display:flex}
+#toast a{color:#FFC48A;font-weight:700}
+.footer{color:var(--mute);font-size:.8rem;text-align:center;margin-top:10px}
+</style>
 </head>
 <body>
-  <h1>Hello, World</h1>
+<div class="wrap" id="app"></div>
+<div id="overlay" role="dialog" aria-modal="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* ---------- constants ---------- */
+const KEY = 'allins-leave-v1';
+const TYPES = {
+  AL:{name:'Annual Leave',code:'AL'}, MC:{name:'Medical Leave',code:'MC'}, TR:{name:'Training',code:'TR'},
+  CCL:{name:'Child Care Leave',code:'CCL'}, BDL:{name:'Birthday Leave',code:'BDL'}, ML:{name:'Maternity Leave',code:'ML'},
+  WFH:{name:'Work From Home',code:'WFH'}, HL:{name:'Hospital Leave',code:'HL'}
+};
+const BAL = ['AL','CCL','BDL','ML','WFH','HL','MC'];     // cards shown on the balance panel
+const OTHER = ['CCL','BDL','ML','WFH','HL'];             // extra choices in the apply sheet
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+/* ---------- tiny helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parse = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+const fmt = s => parse(s).toLocaleDateString('en-SG', {weekday:'short', day:'numeric', month:'short'});
+const fmtShort = s => parse(s).toLocaleDateString('en-SG', {day:'numeric', month:'short'});
+const first = n => String(n).split(' ')[0];
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const num = n => (Math.round(n * 2) / 2).toString();
+const rangeText = ds => ds.length === 1 ? fmtShort(ds[0]) : `${fmtShort(ds[0])} – ${fmtShort(ds[ds.length-1])}`;
+
+/* ---------- storage (local-first; swap load/save for a server later) ---------- */
+function seed() {
+  const ent = o => ({AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14, ...o});
+  const mk = (id, name, dept, role, e) => ({id, name, dept, role, email:'', pin:'', ent:ent(e), bf:0, bmonth:0});
+  return {v:1, depts:['Sales','SST'], leaves:[], notes:[], people:[
+    mk('p1','Lena','Sales','manager',{AL:16}), mk('p2','Mairebelle Lee','Sales','staff'), mk('p3','Wyonna','Sales','staff'),
+    mk('p4','SST Manager','SST','manager',{AL:16}), mk('p5','SST Staff A','SST','staff'), mk('p6','SST Staff B','SST','staff')
+  ]};
+}
+function load() {
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return d; } catch (e) {}
+  return seed();
+}
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
+let db = load();
+
+/* ---------- UI state ---------- */
+const ui = {
+  me: sessionStorage.getItem('allins-me') || null,
+  view: 'home', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1), dept: null,
+  login: {pid: null, err: ''}
+};
+let sheet = null;
+const cur = () => db.people.find(p => p.id === ui.me) || null;
+const isMgr = p => p && p.role === 'manager';
+
+/* ---------- domain logic ---------- */
+function balances(p, now = new Date()) {
+  const Y = now.getFullYear(), out = {};
+  const mine = db.leaves.filter(l => l.pid === p.id && l.date.startsWith(Y + '-'));
+  for (const t of BAL) { const ent = Number(p.ent[t]) || 0, taken = mine.filter(l => l.type === t).length; out[t] = {ent, taken, left: ent - taken}; }
+  // Annual leave: brought-forward days must be used by 30 Jun, otherwise forfeited from 1 Jul
+  const early = mine.filter(l => l.type === 'AL' && l.date < Y + '-07-01').length;
+  const bf = ymd(now) < Y + '-07-01' ? (Number(p.bf) || 0) : Math.min(Number(p.bf) || 0, early);
+  const al = out.AL; al.bf = bf; al.total = al.ent + bf; al.left = al.total - al.taken;
+  al.earned = Math.floor(al.ent * (now.getMonth() + 1) / 12 * 2) / 2 + bf;    // earn 1/12 per month
+  return out;
+}
+const awayOn = (date, dept) => db.leaves
+  .filter(l => l.date === date).map(l => ({l, p: db.people.find(p => p.id === l.pid)}))
+  .filter(x => x.p && x.p.dept === dept)
+  .sort((a, b) => a.p.name.localeCompare(b.p.name));
+const countsAway = x => x.l.type !== 'WFH';           // working from home is not "away"
+function expand(start, end) {
+  if (!start) return [];
+  if (!end || end === start) return [start];
+  const a = parse(start), b = parse(end), out = [start];
+  if (b < a) return [];
+  for (let d = new Date(a.getTime() + 864e5), n = 0; d <= b && n < 120; d = new Date(d.getTime() + 864e5), n++) {
+    if (d.getDay() !== 0 && d.getDay() !== 6) out.push(ymd(d));      // ranges skip Sat/Sun
+  }
+  return out;
+}
+function conflicts(me, dates) {
+  const res = [];
+  for (const d of dates) {
+    const others = awayOn(d, me.dept).filter(x => x.p.id !== me.id && countsAway(x)).map(x => x.p);
+    if (others.length) res.push({date: d, others, over: others.length >= 2});
+  }
+  return res;
+}
+function ruleWarnings(me, type, dates) {
+  const w = [], today = new Date(); today.setHours(0,0,0,0);
+  if (!dates.length) return w;
+  if (type === 'AL') {
+    if ((parse(dates[0]) - today) / 864e5 < 7) w.push('Annual leave needs at least 1 week’s notice.');
+    const lim = new Date(today); lim.setMonth(lim.getMonth() + 3);
+    if (parse(dates[dates.length-1]) > lim) w.push('Annual leave can’t be applied more than 3 months in advance.');
+  }
+  if (BAL.includes(type) && type !== 'WFH') {
+    const b = balances(me)[type];
+    if (b.ent === 0 && type !== 'AL') w.push(`You have no ${TYPES[type].name} entitlement set.`);
+    else if (dates.length > b.left) w.push(`Only ${num(Math.max(b.left,0))} ${TYPES[type].name} day(s) left; this uses ${dates.length}.`);
+    if (type === 'AL' && b.taken + dates.length > b.earned && dates.length <= b.left) w.push(`Leave is earned monthly: you have earned ${num(b.earned)} days so far.`);
+  }
+  return w;
+}
+function notifyManagers(me, type, dates, conf) {
+  const mgrs = db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id);
+  const over = conf.filter(c => c.over), any = conf.length > 0;
+  const text = `${me.name} applied for ${TYPES[type].name}, ${rangeText(dates)} (${plural(dates.length, 'day')})`;
+  const list = cs => cs.map(c => `${fmtShort(c.date)}: ${c.others.map(o => first(o.name)).join(', ')} already away`).join('; ');
+  const detail = over.length ? `Over limit, ${list(over)}` : any ? `Clash, ${list(conf)}` : '';
+  mgrs.forEach(m => db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: over.length ? 'alert' : any ? 'warn' : 'info', text, detail}));
+  return mgrs;
+}
+function cancelNotice(me, l) {   // keep the manager's earlier notice from going stale
+  db.people.filter(p => isMgr(p) && p.dept === me.dept && p.id !== me.id).forEach(m =>
+    db.notes.unshift({id: uid(), to: m.id, from: me.id, ts: Date.now(), read: false, level: 'info', text: `${me.name} cancelled ${TYPES[l.type].name} on ${fmtShort(l.date)}`, detail: ''}));
+}
+async function hashPin(pin, id) {
+  const data = new TextEncoder().encode(id + ':' + pin);
+  if (window.crypto && crypto.subtle) {
+    const b = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+  let h = 5381; for (const c of id + pin) h = ((h << 5) + h + c.charCodeAt(0)) | 0; return 'x' + h;
+}
+
+/* ---------- rendering ---------- */
+function render() {
+  const me = cur();
+  if (!me) { ui.me = null; sessionStorage.removeItem('allins-me'); $('#app').innerHTML = loginHTML(); return; }
+  if (!ui.dept || !isMgr(me)) ui.dept = me.dept;
+  $('#app').innerHTML = headerHTML(me) + (ui.view === 'team' && isMgr(me) ? teamHTML() : homeHTML(me));
+}
+const LOGO = '<svg viewBox="0 0 24 24" fill="none" stroke="#1F1D1A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15.5l2 2 4-4"/></svg>';
+
+function loginHTML() {
+  const L = ui.login, p = db.people.find(x => x.id === L.pid);
+  const brand = `<div class="brand" style="margin-bottom:18px"><span class="logo">${LOGO}</span><div><b>ALL INS</b><small>Leave Tracker</small></div></div>`;
+  if (!p) {
+    const groups = db.depts.map(d => {
+      const ms = db.people.filter(x => x.dept === d).sort((a,b) => (isMgr(b)-isMgr(a)) || a.name.localeCompare(b.name));
+      if (!ms.length) return '';
+      return `<div class="dept-h">${esc(d)}</div><div class="people">${ms.map(x => `<button class="person" data-a="pick" data-id="${x.id}"><span>${esc(x.name)}</span><small>${isMgr(x) ? 'Manager' : ''}</small></button>`).join('')}</div>`;
+    }).join('');
+    return `<div class="login">${brand}<div class="card"><h2>Who are you?</h2><div class="sub">Select your name. Your leave balance is shown only to you, after you enter your PIN.</div>${groups}</div></div>`;
+  }
+  const creating = !p.pin;
+  return `<div class="login">${brand}<form class="card" data-form="pin"><h2>${esc(p.name)}</h2><div class="sub">${esc(p.dept)}${isMgr(p) ? ' · Manager' : ''}</div>
+    <label class="f" for="pin">${creating ? 'Create a PIN (4 to 8 digits)' : 'Enter your PIN'}</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="${creating ? 'new-password' : 'current-password'}" pattern="[0-9]{4,8}" maxlength="8" required autofocus>
+    ${creating ? '<label class="f" for="pin2">Confirm PIN</label><input id="pin2" type="password" inputmode="numeric" maxlength="8" required>' : ''}
+    ${L.err ? `<div class="err">${esc(L.err)}</div>` : ''}
+    <div class="actions"><button type="button" class="btn" data-a="back">Back</button><button class="btn primary">${creating ? 'Save PIN and continue' : 'Continue'}</button></div>
+    ${creating ? '' : '<div class="sub" style="margin-top:12px">Forgot your PIN? Ask your manager to reset it.</div>'}</form></div>`;
+}
+
+function headerHTML(me) {
+  const unread = isMgr(me) ? db.notes.filter(n => n.to === me.id && !n.read).length : 0;
+  return `<div class="top"><div class="brand"><span class="logo">${LOGO}</span><div><b>ALL INS</b><small>Leave Tracker</small></div></div>
+    <div class="grow"></div>
+    <div style="font-weight:600">${esc(me.name)}<span class="chipdept">${esc(me.dept)}${isMgr(me) ? ' · Manager' : ''}</span></div>
+    ${isMgr(me) ? `<button class="btn bell" data-a="bell" aria-label="Notifications, ${unread} unread">Alerts${unread ? `<span class="n">${unread}</span>` : ''}</button>
+      <button class="btn" data-a="view" data-v="${ui.view === 'team' ? 'home' : 'team'}">${ui.view === 'team' ? 'Calendar' : 'Team'}</button>` : ''}
+    <button class="btn ghost" data-a="logout">Switch user</button></div>`;
+}
+
+function homeHTML(me) {
+  return balanceHTML(me) + (isMgr(me) ? notesHTML(me) : '') + calendarHTML(me) + myLeaveHTML(me) +
+    '<div class="footer">Data is saved on this device. Each person’s balance is visible only after signing in with their own PIN.</div>';
+}
+
+function balanceHTML(me) {
+  const b = balances(me), yr = new Date().getFullYear();
+  const cards = BAL.map(t => {
+    const x = b[t]; let big, sub;
+    if (t === 'WFH') { big = x.taken; sub = x.ent ? `days used · cap ${x.ent}` : 'days used this year'; }
+    else if (x.ent === 0 && x.taken === 0) { big = '–'; sub = 'Not entitled'; }
+    else { big = num(x.left); sub = `of ${num(t === 'AL' ? x.total : x.ent)} · ${num(x.taken)} taken`; }
+    if (t === 'AL') sub += `<br>Earned so far: ${num(x.earned)}` + (x.bf ? `<br>Incl. ${num(x.bf)} brought forward` : '');
+    if (t === 'BDL' && me.bmonth) sub += `<br>Use by end of ${MONTHS[(me.bmonth - 1 + 3) % 12]}`;
+    return `<div class="bal ${t === 'AL' ? 'hi' : ''}"><div class="l">${TYPES[t].name}</div><div class="v ${typeof big === 'number' || x.left >= 0 ? '' : 'neg'}">${big}</div><div class="s">${sub}</div></div>`;
+  }).join('');
+  return `<section class="card"><h2>My leave balance</h2><div class="sub">${yr} · days remaining. Only you can see this.</div><div class="bal-grid">${cards}</div></section>`;
+}
+
+function notesHTML(me) {
+  const mine = db.notes.filter(n => n.to === me.id).slice(0, 12), unread = mine.filter(n => !n.read).length;
+  const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'}"><div class="t">${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
+    : '<div class="sub" style="margin-top:10px">No leave applications yet. You’ll be notified here when someone applies.</div>';
+  const canPush = 'Notification' in window && Notification.permission === 'default';
+  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>Leave applications</h2><div class="sub">${esc(me.dept)} team${unread ? ` · ${unread} new` : ''}</div></div>
+    ${canPush ? '<button class="btn" data-a="enable-push">Enable alerts</button>' : ''}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div>${items}</section>`;
+}
+
+function calendarHTML(me) {
+  const dept = ui.dept, y = ui.month.getFullYear(), mo = ui.month.getMonth();
+  const lead = (new Date(y, mo, 1).getDay() + 6) % 7, dim = new Date(y, mo + 1, 0).getDate(), todayKey = ymd(new Date());
+  const cells = [...Array(lead).fill(null), ...Array.from({length: dim}, (_, i) => new Date(y, mo, i + 1))];
+  while (cells.length % 7) cells.push(null);
+  const body = cells.map(d => {
+    if (!d) return '<div class="cell blank"></div>';
+    const k = ymd(d), away = awayOn(k, dept), n = away.filter(countsAway).length, wk = d.getDay() === 0 || d.getDay() === 6;
+    const mineHere = away.some(x => x.p.id === me.id);
+    const chips = away.slice(0, 3).map(({p, l}) => {
+      const show = isMgr(me) || p.id === me.id || ['AL','TR','WFH','BDL'].includes(l.type);
+      return `<span class="chip ${show ? 't-' + l.type : 't-X'}" title="${esc(p.name)}: ${show ? TYPES[l.type].name : 'Away'}"><i>${esc(first(p.name))}</i><b>${show ? l.type : 'Away'}</b></span>`;
+    }).join('') + (away.length > 3 ? `<span class="more">+${away.length - 3}</span>` : '');
+    const label = `${fmt(k)}. ${n ? n + ' away' : 'nobody away'}`;
+    return `<button class="cell ${wk ? 'wk' : ''} ${k === todayKey ? 'today' : ''} ${n >= 2 ? 'over' : ''} ${mineHere ? 'mine' : ''}" data-a="day" data-d="${k}" aria-label="${esc(label)}"><span class="d">${d.getDate()}</span>${n >= 2 ? `<em class="bdg">${n}<span class="x"> away</span></em>` : ''}<span class="chips">${chips}</span></button>`;
+  }).join('');
+  const tabs = isMgr(me) && db.depts.length > 1 ? `<div class="tabs">${db.depts.map(d => `<button class="tab" aria-pressed="${d === dept}" data-a="dept" data-d="${esc(d)}">${esc(d)}</button>`).join('')}</div>` : '';
+  const legend = [['AL','sage'],['MC','slate'],['TR','sand'],['Other','stone']].map(([c,s]) => `<span><i class="sw" style="background:var(--${s})"></i>${c === 'AL' ? 'Annual' : c === 'MC' ? 'Medical' : c === 'TR' ? 'Training' : 'Other leave'}</span>`).join('') +
+    '<span><i class="sw" style="border:1px dashed var(--mute)"></i>Work from home</span><span><i class="sw" style="background:var(--accent-soft);border:2px solid var(--accent)"></i>More than one away</span>';
+  return `<section class="card"><div class="cal-head"><button class="btn" data-a="month" data-n="-1" aria-label="Previous month">‹</button><h2>${MONTHS[mo]} ${y}</h2><button class="btn" data-a="month" data-n="1" aria-label="Next month">›</button>
+    <button class="btn" data-a="today">Today</button><div class="grow"></div>${tabs}</div>
+    <div class="sub" style="margin-bottom:6px">${esc(dept)} department. Tap a day to mark your leave. The orange outline means more than one person is away.</div>
+    <div class="legend">${legend}</div>
+    <div class="grid">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x => `<div class="dow">${x}</div>`).join('')}${body}</div></section>`;
+}
+
+function myLeaveHTML(me) {
+  const Y = String(new Date().getFullYear()), mine = db.leaves.filter(l => l.pid === me.id && l.date.startsWith(Y)).sort((a, b) => a.date.localeCompare(b.date));
+  const items = mine.length ? mine.map(l => `<div class="item"><span class="pill t-${l.type}">${l.type}</span><div class="grow"><b>${fmt(l.date)}</b> · ${TYPES[l.type].name}${l.buddy ? `<div class="sub">Buddy: ${esc(l.buddy)}</div>` : ''}${l.note ? `<div class="sub">${esc(l.note)}</div>` : ''}</div><button class="btn ghost danger" data-a="del" data-id="${l.id}" aria-label="Remove ${fmt(l.date)}">Remove</button></div>`).join('')
+    : '<div class="sub" style="margin-top:10px">Nothing marked yet. Tap a day on the calendar to start.</div>';
+  return `<section class="card"><h2>My leave in ${Y}</h2>${items}</section>`;
+}
+
+function teamHTML() {
+  const groups = db.depts.map(d => {
+    const ms = db.people.filter(p => p.dept === d);
+    return `<div class="dept-h">${esc(d)}</div>` + ms.map(p => `<div class="item"><div class="grow"><b>${esc(p.name)}</b> ${isMgr(p) ? '<span class="chipdept">Manager</span>' : ''}<div class="sub">${p.email ? esc(p.email) : 'No email set'} · ${p.pin ? 'PIN set' : 'No PIN yet'}</div></div><button class="btn" data-a="edit" data-id="${p.id}">Edit</button></div>`).join('');
+  }).join('');
+  return `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}</section>
+    <section class="card"><h2>Backup</h2><div class="sub">Data lives on this device. Export a copy to keep it safe or move it to another device.</div><div class="actions"><button class="btn" data-a="export">Export data</button><label class="btn" style="cursor:pointer">Import data<input type="file" id="imp" accept="application/json" hidden></label></div></section>`;
+}
+
+/* ---------- apply-leave sheet ---------- */
+function openSheet(date) {
+  const me = cur(), mine = db.leaves.find(l => l.pid === me.id && l.date === date);
+  const away = awayOn(date, me.dept).filter(x => x.p.id !== me.id);
+  const buddies = db.people.filter(p => p.dept === me.dept && p.id !== me.id);
+  sheet = {date};
+  const seg = ['AL','MC','TR'].map((t, i) => `<label><input type="radio" name="type" value="${t}" ${i === 0 ? 'checked' : ''}>${TYPES[t].name}</label>`).join('');
+  $('#overlay').innerHTML = `<form class="sheet" id="sheetForm"><h2>${fmt(date)}</h2>
+    <div class="sub">${away.length ? 'Away today: ' + away.map(x => esc(first(x.p.name)) + (isMgr(me) || x.l.type === 'AL' || x.l.type === 'TR' ? ' (' + x.l.type + ')' : '')).join(', ') : 'Nobody else in ' + esc(me.dept) + ' is away.'}</div>
+    ${mine ? `<div class="okbox">You already have <b>${TYPES[mine.type].name}</b> on this day. <button type="button" class="btn danger" style="margin-left:8px" data-a="del-sheet" data-id="${mine.id}">Remove it</button></div>` : ''}
+    <div class="seg" role="radiogroup" aria-label="Leave type">${seg}</div>
+    <label class="f" for="other">Or another type</label>
+    <select id="other"><option value="">Choose…</option>${OTHER.map(t => `<option value="${t}">${TYPES[t].name}</option>`).join('')}</select>
+    <div class="two"><div><label class="f" for="to">Through (optional)</label><input type="date" id="to" min="${date}"></div>
+    <div><label class="f" for="buddy">Buddy during absence</label><select id="buddy"><option value="">None</option>${buddies.map(p => `<option>${esc(p.name)}</option>`).join('')}</select></div></div>
+    <label class="f" for="note">Remarks (optional)</label><input type="text" id="note" maxlength="120" placeholder="e.g. Son’s medical appointment">
+    <div id="warn"></div>
+    <div class="actions"><button type="button" class="btn" data-a="close">Cancel</button><button class="btn primary" id="go">Apply leave</button></div></form>`;
+  $('#overlay').classList.add('on');
+  const f = $('#sheetForm'); f.addEventListener('input', updSheet); f.addEventListener('change', e => {
+    if (e.target.name === 'type') $('#other').value = '';
+    if (e.target.id === 'other' && e.target.value) f.querySelectorAll('[name=type]').forEach(r => r.checked = false);
+    updSheet();
+  });
+  f.addEventListener('submit', e => { e.preventDefault(); submitLeave(); });
+  updSheet();
+}
+function sheetVals() {
+  const f = $('#sheetForm'), r = f.querySelector('[name=type]:checked');
+  const type = $('#other').value || (r ? r.value : 'AL');
+  return {type, dates: expand(sheet.date, $('#to').value), toRaw: $('#to').value, buddy: $('#buddy').value, note: $('#note').value.trim()};
+}
+function updSheet() {
+  const me = cur(), v = sheetVals(), box = $('#warn'), go = $('#go');
+  if (!v.dates.length) { box.innerHTML = '<div class="warnbox">The end date is before the start date.</div>'; go.disabled = true; return; }
+  go.disabled = false;
+  const conf = conflicts(me, v.dates).filter(c => v.type !== 'WFH'), rules = ruleWarnings(me, v.type, v.dates), items = [];
+  conf.forEach(c => items.push(`<b>${fmtShort(c.date)}</b>: ${c.others.map(o => esc(first(o.name))).join(' and ')} already away${c.over ? ' (over the limit)' : ''}. Max 1 person per department.`));
+  rules.forEach(r => items.push(esc(r)));
+  box.innerHTML = (items.length ? `<div class="warnbox"><b>Heads up</b><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul><div style="margin-top:6px">Your manager will be notified${conf.some(c => c.over) ? ' with an over-limit alert' : ''}.</div></div>`
+    : `<div class="okbox">No clashes. ${plural(v.dates.length, 'day')} · your manager will be notified.</div>`);
+  go.textContent = items.length ? 'Apply anyway' : v.dates.length > 1 ? `Apply ${v.dates.length} days` : 'Apply leave';
+}
+function submitLeave() {
+  const me = cur(), v = sheetVals(); if (!v.dates.length) return;
+  const conf = v.type === 'WFH' ? [] : conflicts(me, v.dates), batch = uid();
+  db.leaves = db.leaves.filter(l => !(l.pid === me.id && v.dates.includes(l.date)));
+  v.dates.forEach(d => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, buddy: v.buddy, note: v.note, batch, created: Date.now()}));
+  const mgrs = notifyManagers(me, v.type, v.dates, conf);
+  save(); closeSheet(); render();
+  const m = mgrs.find(x => x.email);
+  if (!mgrs.length) return toast('Saved. There is no other manager in your department to notify.');
+  const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)} (${plural(v.dates.length, 'day')}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
+  toast(`Saved. ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
+}
+function closeSheet() { $('#overlay').classList.remove('on'); $('#overlay').innerHTML = ''; sheet = null; }
+
+/* ---------- team editor ---------- */
+function openPerson(id) {
+  const p = id ? db.people.find(x => x.id === id) : {id: '', name: '', dept: db.depts[0] || '', role: 'staff', email: '', ent: {AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14}, bf: 0, bmonth: 0};
+  const E = t => `<div><label class="f" for="e_${t}">${TYPES[t].name}</label><input type="number" id="e_${t}" min="0" step="0.5" value="${p.ent[t] ?? 0}"></div>`;
+  $('#overlay').innerHTML = `<form class="sheet" id="personForm"><h2>${id ? 'Edit person' : 'Add person'}</h2>
+    <label class="f" for="pn">Name</label><input type="text" id="pn" value="${esc(p.name)}" required>
+    <div class="two"><div><label class="f" for="pd">Department</label><input type="text" id="pd" list="dl" value="${esc(p.dept)}" required><datalist id="dl">${db.depts.map(d => `<option>${esc(d)}</option>`).join('')}</datalist></div>
+    <div><label class="f" for="pr">Role</label><select id="pr"><option value="staff" ${p.role === 'staff' ? 'selected' : ''}>Staff</option><option value="manager" ${p.role === 'manager' ? 'selected' : ''}>Manager</option></select></div></div>
+    <label class="f" for="pe">Email (for “Also email” on notifications)</label><input type="email" id="pe" value="${esc(p.email)}">
+    <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}"></div>
+    <div><label class="f" for="pm">Birthday month</label><select id="pm"><option value="0">Not set</option>${MONTHS.map((m, i) => `<option value="${i+1}" ${p.bmonth === i+1 ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
+    <h2 style="margin-top:20px">Yearly entitlement (days)</h2><div class="two">${BAL.map(E).join('')}</div>
+    <div class="sub" style="margin-top:8px">Annual leave: 14 for staff, up to 16 for executives. Brought forward is capped at 50% of entitlement.</div>
+    <div class="actions"><button type="button" class="btn" data-a="close">Cancel</button>${id ? '<button type="button" class="btn" data-a="reset-pin" data-id="' + id + '">Reset PIN</button>' : ''}${id && id !== ui.me ? '<button type="button" class="btn danger" data-a="del-person" data-id="' + id + '">Delete</button>' : ''}<button class="btn primary">Save</button></div></form>`;
+  $('#overlay').classList.add('on');
+  $('#personForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = $('#pn').value.trim(), dept = $('#pd').value.trim(); if (!name || !dept) return;
+    const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
+    const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
+    const rec = id ? db.people.find(x => x.id === id) : {id: uid(), pin: ''};
+    Object.assign(rec, {name, dept, role: $('#pr').value, email: $('#pe').value.trim(), ent, bf, bmonth: Number($('#pm').value)});
+    if (!id) db.people.push(rec);
+    if (!db.depts.includes(dept)) db.depts.push(dept);
+    save(); closeSheet(); render();
+  });
+}
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg, link) {
+  const t = $('#toast'); t.innerHTML = `<span>${esc(msg)}</span>${link ? `<a href="${link.href}">${esc(link.label)}</a>` : ''}`;
+  t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 9000);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-a]'); if (!el) { if (e.target.id === 'overlay') closeSheet(); return; }
+  const me = cur(), a = el.dataset.a, id = el.dataset.id;
+  switch (a) {
+    case 'pick': ui.login = {pid: id, err: ''}; render(); break;
+    case 'back': ui.login = {pid: null, err: ''}; render(); break;
+    case 'logout': ui.me = null; sessionStorage.removeItem('allins-me'); ui.login = {pid: null, err: ''}; ui.view = 'home'; closeSheet(); render(); break;
+    case 'view': ui.view = el.dataset.v; render(); break;
+    case 'month': ui.month = new Date(ui.month.getFullYear(), ui.month.getMonth() + Number(el.dataset.n), 1); render(); break;
+    case 'today': { const n = new Date(); ui.month = new Date(n.getFullYear(), n.getMonth(), 1); render(); break; }
+    case 'dept': ui.dept = el.dataset.d; render(); break;
+    case 'day': openSheet(el.dataset.d); break;
+    case 'close': closeSheet(); break;
+    case 'del': case 'del-sheet': {
+      const gone = db.leaves.find(l => l.id === id); db.leaves = db.leaves.filter(l => l.id !== id);
+      if (gone && me) cancelNotice(me, gone);
+      save(); if (a === 'del-sheet') closeSheet(); render(); break;
+    }
+    case 'bell': { const n = $('#notes'); if (n) n.scrollIntoView({behavior: 'smooth'}); break; }
+    case 'read-all': db.notes.filter(n => n.to === me.id).forEach(n => n.read = true); save(); render(); break;
+    case 'enable-push': Notification.requestPermission().then(render); break;
+    case 'edit': openPerson(id); break;
+    case 'reset-pin': if (confirm('Reset this person’s PIN? They will create a new one next time they sign in.')) { db.people.find(p => p.id === id).pin = ''; save(); closeSheet(); render(); toast('PIN reset.'); } break;
+    case 'del-person': if (confirm('Delete this person and all their leave records?')) { db.people = db.people.filter(p => p.id !== id); db.leaves = db.leaves.filter(l => l.pid !== id); db.notes = db.notes.filter(n => n.to !== id && n.from !== id); save(); closeSheet(); render(); } break;
+    case 'export': { const b = new Blob([JSON.stringify(db, null, 2)], {type: 'application/json'}), u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = `leave-tracker-${ymd(new Date())}.json`; x.click(); URL.revokeObjectURL(u); break; }
+  }
+});
+document.addEventListener('submit', async e => {
+  if (e.target.dataset.form !== 'pin') return;
+  e.preventDefault();
+  const p = db.people.find(x => x.id === ui.login.pid), pin = $('#pin').value;
+  if (!/^\d{4,8}$/.test(pin)) { ui.login.err = 'Use 4 to 8 digits.'; return render(); }
+  if (!p.pin) {
+    if (pin !== $('#pin2').value) { ui.login.err = 'The two PINs don’t match.'; return render(); }
+    p.pin = await hashPin(pin, p.id); save();
+  } else if (p.pin !== await hashPin(pin, p.id)) { ui.login.err = 'That PIN is not right.'; return render(); }
+  ui.me = p.id; sessionStorage.setItem('allins-me', p.id); ui.login = {pid: null, err: ''}; ui.view = 'home'; ui.dept = p.dept; render();
+});
+document.addEventListener('change', e => {
+  if (e.target.id !== 'imp' || !e.target.files[0]) return;
+  e.target.files[0].text().then(t => {
+    try { const d = JSON.parse(t); if (!Array.isArray(d.people) || !Array.isArray(d.leaves)) throw 0; if (confirm('Replace all data on this device with this file?')) { db = d; save(); ui.me = null; sessionStorage.removeItem('allins-me'); render(); } }
+    catch (x) { toast('That file isn’t a valid leave tracker backup.'); }
+  });
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheet !== null || e.key === 'Escape' && $('#overlay').classList.contains('on')) closeSheet(); });
+
+/* a manager with the app open in another tab or window gets new applications straight away */
+window.addEventListener('storage', e => {
+  if (e.key !== KEY) return;
+  const me = cur(), before = me ? db.notes.filter(n => n.to === me.id).length : 0;
+  db = load(); render();
+  const m2 = cur(); if (!m2 || !isMgr(m2)) return;
+  const fresh = db.notes.filter(n => n.to === m2.id), added = fresh.length - before;
+  if (added > 0) {
+    const n = fresh[0]; toast(n.text);
+    if ('Notification' in window && Notification.permission === 'granted') new Notification('Leave application', {body: n.text + (n.detail ? '. ' + n.detail : ''), icon: 'icons/icon-192.png'});
+  }
+});
+
+render();
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
 </body>
 </html>
