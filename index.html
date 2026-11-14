@@ -764,6 +764,7 @@ function openPerson(id) {
       : `<div class="sub" style="margin-top:12px">Approving manager: <b>${esc((db.people.find(x => x.id === p.approver) || {name: id ? 'none (no approval needed)' : 'Belle (default)'}).name)}</b>. Only the administrator can change this.</div>`}
     <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pc" style="width:auto" ${p.confirmed === false ? '' : 'checked'}> Confirmed staff (eligible for work from home)</label>
     <label class="f" for="pini">Initials on the calendar (up to 4 letters)</label><input type="text" id="pini" maxlength="4" value="${esc(initialsOf(p))}" style="max-width:140px">
+    <label class="f">Calendar colour</label><input type="hidden" id="pcolor" value="${esc(colorOf(p))}"><div class="swrow" id="pcolors">${COLORS.map(c => `<button type="button" class="swatch ${c.toLowerCase() === colorOf(p).toLowerCase() ? 'on' : ''}" data-a="pf-color" data-c="${c}" style="background:${c}" aria-label="Colour ${c}"></button>`).join('')}</div>
     <label class="f" for="pe">Email (for “Also email” on notifications)</label><input type="email" id="pe" value="${esc(p.email)}">
     <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}"></div>
     <div><label class="f" for="pdob">Date of birth</label><input type="date" id="pdob" max="${ymd(new Date())}" value="${esc(p.dob || '')}"></div></div>
@@ -778,7 +779,7 @@ function openPerson(id) {
     const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
     const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
     const rec = id ? db.people.find(x => x.id === id) : {id: uid()};
-    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver !== undefined && id ? rec.approver : defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, dob: $('#pdob').value || '', ini: cleanIni($('#pini').value) || initialsOf({name}), bmonth: $('#pdob').value ? Number($('#pdob').value.slice(5, 7)) : (rec.bmonth || 0)});
+    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver !== undefined && id ? rec.approver : defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, color: $('#pcolor').value, dob: $('#pdob').value || '', ini: cleanIni($('#pini').value) || initialsOf({name}), bmonth: $('#pdob').value ? Number($('#pdob').value.slice(5, 7)) : (rec.bmonth || 0)});
     if (!id) db.people.push(rec);
     notifyTeam(cur(), id ? `${cur().name} updated ${name}’s details or entitlements` : `${cur().name} added ${name} to ${dept}`);
     if (!db.depts.includes(dept)) db.depts.push(dept);
@@ -815,6 +816,7 @@ document.addEventListener('click', e => {
       if (dup) return toast(`Two leave types use “${dup}”. Each needs its own initials.`);
       db.codes = c; save(); render(); toast('Leave type initials saved.'); break; }
     case 'codes-reset': if (isAdmin(me)) { db.codes = {}; save(); render(); toast('Back to the default initials.'); } break;
+    case 'pf-color': { const c = el.dataset.c; if (/^#[0-9a-fA-F]{6}$/.test(c)) { $('#pcolor').value = c; document.querySelectorAll('#pcolors .swatch').forEach(b => b.classList.toggle('on', b.dataset.c === c)); } break; }
     case 'pick-color': { const c = el.dataset.c; if (/^#[0-9a-fA-F]{6}$/.test(c)) { me.color = c; save(); document.querySelectorAll('#colors .swatch').forEach(b => b.classList.toggle('on', b.dataset.c === c)); render(); } break; }
     case 'del': case 'del-sheet': {
       const gone = db.leaves.find(l => l.id === id); db.leaves = db.leaves.filter(l => l.id !== id);
