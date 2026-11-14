@@ -272,7 +272,7 @@ let db = load();
 const ui = {
   me: localStorage.getItem('allins-me') || null,
   view: 'home', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1), dept: null,
-  login: {pid: null, err: ''}
+  login: {pid: null, err: ''}, notesOpen: false
 };
 let sheet = null;
 let swReg = null;
@@ -525,6 +525,7 @@ function approvalsHTML(me) {
     const b = BAL.includes(type) && type !== 'WFH' ? balances(who)[type] : null, key = ents[0].batch || ents[0].id;
     return `<div class="item" style="align-items:flex-start;flex-wrap:wrap"><div class="grow" style="min-width:220px"><b>${esc(who.name)}</b> <span class="chipdept">${esc(who.dept)}</span>
       <div>${TYPES[type].name}${part === 'FULL' ? '' : ' · ' + PARTS[part]} · ${esc(rangeText(dates))} · ${daysText(days)}</div>
+      <div class="sub">Submitted ${esc(new Date(ents[0].created || Date.now()).toLocaleString('en-SG', {day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit'}))}</div>
       ${b ? `<div class="sub">${TYPES[type].name} balance: ${num(b.left + days)} before, ${num(b.left)} after</div>` : ''}
       ${ents[0].note ? `<div class="sub">Remarks: ${esc(ents[0].note)}</div>` : ''}
       ${conf.length ? `<div class="sub" style="color:var(--accent-ink)">Clash: ${conf.map(c => fmtShort(c.d) + ' ' + c.others.map(o => esc(first(o.name))).join(', ')).join('; ')} also away</div>` : ''}
@@ -572,7 +573,7 @@ function openRequest(batch, noteId) {
     ${row('Length', daysText(days))}
     ${bal ? row(TYPES[type].name + ' balance', `${num(bal.left + days)} days left before this request · ${num(bal.left)} after${bal.left < 0 ? ' (over balance)' : ''}`) : ''}
     ${ents[0].rel ? row('Relationship', esc(ents[0].rel)) : ''}${ents[0].note ? row('Remarks', esc(ents[0].note)) : ''}${ents[0].buddy ? row('Buddy', esc(ents[0].buddy)) : ''}
-    ${row('Applied', new Date(ents[0].created || Date.now()).toLocaleString('en-SG', {day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit'}))}
+    ${row('Submitted', new Date(ents[0].created || Date.now()).toLocaleString('en-SG', {day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit'}))}
     ${conf.length ? `<div class="warnbox" style="margin-top:12px"><b>Team clashes in ${esc(who.dept)} (leave or WFH)</b><ul>${conf.map(c => `<li><b>${fmtShort(c.d)}</b>: ${c.others.map(o => esc(first(o.p.name)) + (isPending(o.l) ? ' (pending)' : '')).join(' and ')} also away${c.others.length >= 2 ? ' (over the limit)' : ''}</li>`).join('')}</ul></div>` : '<div class="okbox">No one else from ' + esc(who.dept) + ' is away on these dates.</div>'}
     ${(ents[0].flags || []).length ? `<div class="warnbox" style="margin-top:12px"><b>Policy flags</b><ul>${ents[0].flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
     <div class="sub" style="margin-top:10px">Approving manager: <b>${esc(ap ? ap.name : 'none')}</b></div>
@@ -581,15 +582,17 @@ function openRequest(batch, noteId) {
   $('#overlay').classList.add('on'); render();
 }
 function notesHTML(me) {
-  const mine = db.notes.filter(n => n.to === me.id).slice(0, 15), unread = mine.filter(n => !n.read).length;
+  const now = new Date(), thisMonth = n => { const d = new Date(n.ts); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); };
+  const mine = db.notes.filter(n => n.to === me.id && thisMonth(n)), unread = db.notes.filter(n => n.to === me.id && !n.read).length, unreadMonth = mine.filter(n => !n.read).length;
   const live = n => n.batch && db.leaves.some(l => l.batch === n.batch);
   const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'} ${live(n) ? 'click' : ''}" ${live(n) ? `data-a="open-req" data-b="${n.batch}" data-n="${n.id}" tabindex="0" role="button" aria-label="Review request: ${esc(n.text)}"` : ''}><div class="t">${noteTag(n)}${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}${noteState(n, me)}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
-    : `<div class="sub" style="margin-top:10px">${isMgr(me) ? 'No leave applications yet. You’ll be notified here when someone applies.' : 'Nothing yet. You’ll be notified here when your leave is approved or rejected.'}</div>`;
+    : `<div class="sub" style="margin-top:10px">${isMgr(me) ? 'No leave applications this month. You’ll be notified here when someone applies.' : 'Nothing this month. You’ll be notified here when your leave is approved or rejected.'}</div>`;
+  const listHTML = `<details id="notesList" style="margin-top:10px" ${ui.notesOpen ? 'open' : ''}><summary class="sub" style="cursor:pointer"><b>${esc(now.toLocaleString('en-SG', {month: 'long', year: 'numeric'}))}</b> · ${mine.length} notification${mine.length === 1 ? '' : 's'}${unreadMonth ? ` · ${unreadMonth} new` : ''} <span style="color:var(--accent-ink)">(tap to ${ui.notesOpen ? 'hide' : 'show'})</span></summary>${items}</details>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   const pushBtn = perm === 'default' ? '<button class="btn primary" data-a="enable-push">Turn on notifications</button>' : perm === 'granted' ? '<button class="btn" data-a="test-push">Send test</button>' : '';
   const pushNote = perm === 'granted' ? 'Notifications are on for this device, including when the app is closed.' : perm === 'denied' ? 'Notifications are blocked. Allow them for this site in your browser or phone settings.' : perm === 'unsupported' ? 'This browser can’t show notifications. On iPhone, first add the app to your Home Screen (Share, then Add to Home Screen), then open it from there.' : isMgr(me) ? 'Get a notification on this phone, even when the app is closed, when someone applies for leave, and when leave is approved or rejected.' : 'Get a notification on this phone, even when the app is closed, when your leave is approved or rejected.';
   return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>${isMgr(me) ? 'Leave applications' : 'Notifications'}</h2><div class="sub">${isMgr(me) ? 'All leave and team updates' : 'Leave approvals and rejections'}${unread ? ` · ${unread} new` : ''}</div></div>
-    ${pushBtn}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div><div class="sub" style="margin-top:6px">${pushNote}</div>${items}</section>`;
+    ${pushBtn}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div><div class="sub" style="margin-top:6px">${pushNote}</div>${listHTML}</section>`;
 }
 
 function calendarHTML(me) {
@@ -804,6 +807,7 @@ function toast(msg, link) {
 }
 
 /* ---------- events ---------- */
+document.addEventListener('toggle', e => { if (e.target && e.target.id === 'notesList') ui.notesOpen = e.target.open; }, true);
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-a]'); if (!el) { if (e.target.id === 'overlay') closeSheet(); return; }
   const me = cur(), a = el.dataset.a, id = el.dataset.id;
