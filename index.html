@@ -467,7 +467,11 @@ function policyHTML() {
 }
 function homeHTML(me) {
   if (isAdmin(me)) return calendarHTML(me) + '<div class="footer">Administrator view. The calendar is read-only; use Admin to manage approving managers and people.</div>' + policyHTML();
-  return balanceHTML(me) + notesHTML(me) + calendarHTML(me) + myLeaveHTML(me) + policyHTML() +
+  const pm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const pushBanner = pm === 'default' ? `<section class="card" style="border-left:6px solid var(--accent)"><div class="row"><div class="grow"><h2>Turn on notifications</h2><div class="sub">${isMgr(me) ? 'Get an alert on this phone when a leave needs your approval, and when leave is approved or rejected, even when the app is closed.' : 'Get an alert on this phone when your leave is approved or rejected, even when the app is closed.'}</div></div><button class="btn primary" data-a="enable-push">Turn on</button></div></section>`
+    : pm === 'unsupported' ? `<section class="card" style="border-left:6px solid var(--accent)"><h2>Notifications need the Home Screen app</h2><div class="sub">On iPhone, tap Share, then Add to Home Screen, and open the app from that icon. Then come back here and turn on notifications.</div></section>`
+    : pm === 'denied' ? `<section class="card" style="border-left:6px solid var(--accent)"><h2>Notifications are blocked</h2><div class="sub">Allow notifications for this app in your phone or browser settings, then reopen the app.</div></section>` : '';
+  return pushBanner + balanceHTML(me) + notesHTML(me) + calendarHTML(me) + myLeaveHTML(me) + policyHTML() +
     '<div class="footer">Shared with your team and saved on this device. <span id="syncst">' + esc(typeof syncLabel === 'string' ? syncLabel : '') + '</span> Each person’s balance is shown only after signing in with their own PIN.</div>';
 }
 
@@ -560,11 +564,11 @@ function notesHTML(me) {
   const mine = db.notes.filter(n => n.to === me.id).slice(0, 15), unread = mine.filter(n => !n.read).length;
   const live = n => n.batch && db.leaves.some(l => l.batch === n.batch);
   const items = mine.length ? mine.map(n => `<div class="note ${n.level} ${n.read ? '' : 'unread'} ${live(n) ? 'click' : ''}" ${live(n) ? `data-a="open-req" data-b="${n.batch}" data-n="${n.id}" tabindex="0" role="button" aria-label="Review request: ${esc(n.text)}"` : ''}><div class="t">${noteTag(n)}${esc(n.text)}</div>${n.detail ? `<div class="x">${esc(n.detail)}</div>` : ''}${noteState(n, me)}<div class="m">${new Date(n.ts).toLocaleString('en-SG', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</div></div>`).join('')
-    : `<div class="sub" style="margin-top:10px">${isMgr(me) ? 'No leave applications yet. You’ll be notified here when someone applies.' : 'Nothing yet. You’ll be notified here when leave is approved.'}</div>`;
+    : `<div class="sub" style="margin-top:10px">${isMgr(me) ? 'No leave applications yet. You’ll be notified here when someone applies.' : 'Nothing yet. You’ll be notified here when your leave is approved or rejected.'}</div>`;
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
   const pushBtn = perm === 'default' ? '<button class="btn primary" data-a="enable-push">Turn on notifications</button>' : perm === 'granted' ? '<button class="btn" data-a="test-push">Send test</button>' : '';
-  const pushNote = perm === 'granted' ? 'Notifications are on for this device, including when the app is closed.' : perm === 'denied' ? 'Notifications are blocked. Allow them for this site in your browser or phone settings.' : perm === 'unsupported' ? 'This browser can’t show notifications. On iPhone, first add the app to your Home Screen (Share, then Add to Home Screen), then open it from there.' : isMgr(me) ? 'Get a notification on this phone, even when the app is closed, when someone applies for leave or leave is approved.' : 'Get a notification on this phone, even when the app is closed, when leave is approved.';
-  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>${isMgr(me) ? 'Leave applications' : 'Notifications'}</h2><div class="sub">${isMgr(me) ? 'All leave and team updates' : 'Leave approvals'}${unread ? ` · ${unread} new` : ''}</div></div>
+  const pushNote = perm === 'granted' ? 'Notifications are on for this device, including when the app is closed.' : perm === 'denied' ? 'Notifications are blocked. Allow them for this site in your browser or phone settings.' : perm === 'unsupported' ? 'This browser can’t show notifications. On iPhone, first add the app to your Home Screen (Share, then Add to Home Screen), then open it from there.' : isMgr(me) ? 'Get a notification on this phone, even when the app is closed, when someone applies for leave, and when leave is approved or rejected.' : 'Get a notification on this phone, even when the app is closed, when your leave is approved or rejected.';
+  return `<section class="card" id="notes"><div class="row"><div class="grow"><h2>${isMgr(me) ? 'Leave applications' : 'Notifications'}</h2><div class="sub">${isMgr(me) ? 'All leave and team updates' : 'Leave approvals and rejections'}${unread ? ` · ${unread} new` : ''}</div></div>
     ${pushBtn}${unread ? '<button class="btn" data-a="read-all">Mark all read</button>' : ''}</div><div class="sub" style="margin-top:6px">${pushNote}</div>${items}</section>`;
 }
 
