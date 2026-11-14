@@ -96,7 +96,7 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 .chip b s{text-decoration:none}
 .chip i{min-width:0;font-weight:600}
 .t-AL{background:var(--sage)} .t-MC{background:var(--slate)} .t-TR{background:var(--sand)}
-.t-CCL,.t-BDL,.t-ML,.t-HL,.t-UL,.t-UPL,.t-X{background:var(--stone)}
+.t-CCL,.t-BDL,.t-ML,.t-HL,.t-CDL,.t-UL,.t-UPL,.t-X{background:var(--stone)}
 .phl{font-style:normal;font-size:.68rem;font-weight:700;color:var(--accent-ink);background:var(--accent-soft);border-radius:6px;padding:0 5px;margin-left:4px}
 .policy li{margin:6px 0}
 .t-WFH{background:transparent;border:1px dashed var(--mute)}
@@ -186,11 +186,12 @@ const KEY = 'allins-leave-v3';
 const TYPES = {
   AL:{name:'Annual Leave',code:'AL'}, MC:{name:'Medical Leave',code:'MC'}, TR:{name:'Training',code:'TR'},
   CCL:{name:'Child Care Leave',code:'CCL'}, BDL:{name:'Birthday Leave',code:'BDL'}, ML:{name:'Maternity Leave',code:'ML'},
-  WFH:{name:'Work From Home',code:'WFH'}, HL:{name:'Hospital Leave',code:'HL'},
+  WFH:{name:'Work From Home',code:'WFH'}, HL:{name:'Hospital Leave',code:'HL'}, CDL:{name:'Condolences Leave',code:'CDL'},
   UL:{name:'Urgent Leave',code:'UL'}, UPL:{name:'Unpaid Leave',code:'UPL'}, X:{name:'Away',code:'X'}
 };
 const BAL = ['AL','CCL','BDL','ML','WFH','HL','MC'];     // cards shown on the balance panel
-const OTHER = ['CCL','BDL','ML','WFH','HL','UL','UPL'];             // extra choices in the apply sheet
+const OTHER = ['CCL','BDL','ML','WFH','HL','CDL','UL','UPL'];             // extra choices in the apply sheet
+const RELS = ['Parent','Sibling','Spouse','Child'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 /* ---------- tiny helpers ---------- */
@@ -206,7 +207,7 @@ const first = n => String(n).split(' ')[0];
 const COLORS = ['#E4572E','#F29E4C','#E8B923','#7BB661','#2E9E6B','#2BB5B8','#3F6FD9','#3F3FA8','#8E5CC9','#D45FA6','#8A6A52','#4A4A4A'];
 const colorOf = p => /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : COLORS[[...String(p.id)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
 const inkOn = hex => { const n = parseInt(hex.slice(1), 16), L = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return L > 0.62 ? '#111' : '#fff'; };
-const DEFAULT_CODES = {AL:'AL', MC:'MC', TR:'TR', CCL:'CCL', BDL:'BIL', ML:'ML', WFH:'WFH', HL:'HL', UL:'UL', UPL:'UPL'};
+const DEFAULT_CODES = {AL:'AL', MC:'MC', TR:'TR', CCL:'CCL', BDL:'BIL', ML:'ML', WFH:'WFH', HL:'HL', CDL:'CDL', UL:'UL', UPL:'UPL'};
 const codeOf = t => t === 'X' ? 'Away' : ((db.codes && db.codes[t]) || DEFAULT_CODES[t] || t);
 const initialsOf = p => { if (/^[A-Za-z]{1,4}$/.test(p.ini || '')) return p.ini.toUpperCase(); const w = String(p.name || '').trim().split(/\s+/); return (w.length > 1 ? w[0][0] + w[1][0] : String(p.name || '?').slice(0, 2)).toUpperCase(); };
 const cleanIni = v => String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
@@ -215,7 +216,8 @@ function bdayOK(dob, ds) {           // birthday leave must fall within 3 months
   if (!dob) return false; const [, m, d] = dob.split('-').map(Number), t = parse(ds);
   return [t.getFullYear() - 1, t.getFullYear(), t.getFullYear() + 1].some(y => t >= new Date(y, m - 4, d) && t <= new Date(y, m + 2, d));
 }
-function blockReason(me, type, dates) {
+function blockReason(me, type, dates, rel) {
+  if (type === 'CDL' && !RELS.includes(rel)) return 'Condolences leave is for immediate family only: parents, siblings, spouse or children. Choose the relationship above to continue.';
   if (type !== 'BDL') return '';
   if (!me.dob) return 'Your date of birth isn’t set yet. Ask your manager or the administrator to add it before you apply for birthday leave.';
   const bad = dates.filter(d => !bdayOK(me.dob, d));
@@ -343,6 +345,7 @@ function ruleWarnings(me, type, dates, part = 'FULL') {
     const lim = new Date(today); lim.setMonth(lim.getMonth() + 3);
     if (parse(dates[dates.length-1]) > lim) w.push('Annual leave can’t be applied more than 3 months in advance.');
   }
+  if (type === 'CDL') w.push('Condolences leave covers immediate family only: parents, siblings, spouse or children.');
   if (type === 'UL' || type === 'UPL') w.push('Urgent and unpaid leave are approved case by case by your approving manager.');
   if (type === 'WFH') {
     if (me.confirmed === false) w.push('Work from home is for confirmed staff only.');
@@ -459,6 +462,7 @@ function headerHTML(me) {
 function policyHTML() {
   return `<section class="card"><details><summary style="cursor:pointer;font-weight:700;font-size:1.1rem">Leave policy</summary><ul class="policy" style="padding-left:20px;margin:10px 0 0">
     <li><b>Leave application:</b> at least 1 week’s notice, and not more than 3 months in advance.</li>
+    <li><b>Condolences leave:</b> for the passing of immediate family only (parents, siblings, spouse or children). You choose the relationship when you apply.</li>
     <li><b>Urgent / unpaid leave:</b> approved case by case by your approving manager.</li>
     <li><b>WFH needs no approval:</b> just key it in and your managers are told. Update at least 3 days in advance. 1 day per week for confirmed staff. Not allowed in a week with a public holiday.</li>
     <li><b>WFH and leave:</b> on 1 day of leave you may WFH if the handover is done properly and on time. On leave of more than 1 day, WFH needs special approval from management.</li>
@@ -478,7 +482,7 @@ function keyHTML() {
     ${byDept.map(x => `<div class="sub" style="margin:6px 0 2px"><b>${esc(x.d)}</b></div><div class="keygrid">${x.m.map(p => `<div class="keyit"><span class="keychip" style="background:${colorOf(p)};color:${inkOn(colorOf(p))}">${esc(initialsOf(p))}</span> ${esc(p.name)}</div>`).join('')}</div>`).join('')}
     <div class="dept-h">Leave type codes</div>
     <div class="keygrid">${types.map(t => `<div class="keyit"><span class="keychip" style="background:var(--ink);color:#fff">${esc(codeOf(t))}</span> ${esc(TYPES[t].name)}</div>`).join('')}
-      <div class="keyit" style="grid-column:1/-1"><span class="keychip" style="background:var(--ink);color:#fff">Away</span> Private leave (shown to other staff without the type)</div></div>
+      <div class="keyit" style="grid-column:1/-1"><span class="keychip" style="background:var(--ink);color:#fff">Away</span> Private leave such as medical, hospital or condolences (other staff just see Away)</div></div>
     <div class="sub" style="margin-top:8px">Entries read initials - code, for example <b>WY - AL</b> is Wyonna on Annual Leave. A dashed outline means the request is still waiting for approval, and a white bar with a coloured outline is work from home.</div></details></section>`;
 }
 function homeHTML(me) {
@@ -567,7 +571,7 @@ function openRequest(batch, noteId) {
     ${row('Dates', dates.length === 1 ? fmt(dates[0]) : `${fmt(dates[0])} to ${fmt(dates[dates.length - 1])}`)}
     ${row('Length', daysText(days))}
     ${bal ? row(TYPES[type].name + ' balance', `${num(bal.left + days)} days left before this request · ${num(bal.left)} after${bal.left < 0 ? ' (over balance)' : ''}`) : ''}
-    ${ents[0].note ? row('Remarks', esc(ents[0].note)) : ''}${ents[0].buddy ? row('Buddy', esc(ents[0].buddy)) : ''}
+    ${ents[0].rel ? row('Relationship', esc(ents[0].rel)) : ''}${ents[0].note ? row('Remarks', esc(ents[0].note)) : ''}${ents[0].buddy ? row('Buddy', esc(ents[0].buddy)) : ''}
     ${row('Applied', new Date(ents[0].created || Date.now()).toLocaleString('en-SG', {day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit'}))}
     ${conf.length ? `<div class="warnbox" style="margin-top:12px"><b>Team clashes in ${esc(who.dept)} (leave or WFH)</b><ul>${conf.map(c => `<li><b>${fmtShort(c.d)}</b>: ${c.others.map(o => esc(first(o.p.name)) + (isPending(o.l) ? ' (pending)' : '')).join(' and ')} also away${c.others.length >= 2 ? ' (over the limit)' : ''}</li>`).join('')}</ul></div>` : '<div class="okbox">No one else from ' + esc(who.dept) + ' is away on these dates.</div>'}
     ${(ents[0].flags || []).length ? `<div class="warnbox" style="margin-top:12px"><b>Policy flags</b><ul>${ents[0].flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
@@ -673,6 +677,8 @@ function openSheet(date) {
     <div class="sub" id="partHint" style="margin-top:6px">Half days are for a single day. To take several days, set a different “To” date.</div>
     <label class="f" for="other">Or another type</label>
     <select id="other"><option value="">Choose…</option>${OTHER.map(t => `<option value="${t}">${TYPES[t].name}</option>`).join('')}</select>
+    <div id="relRow" style="display:none"><label class="f" for="rel">Relationship to the person who passed away</label><select id="rel"><option value="">Choose…</option>${RELS.map(r => `<option>${r}</option>`).join('')}</select>
+    <div class="sub" style="margin-top:6px">Condolences leave is for immediate family only: parents, siblings, spouse or children.</div></div>
     <div class="two"><div><label class="f" for="from">From</label><input type="date" id="from" value="${date}" required></div>
     <div><label class="f" for="to">To (for more than one day)</label><input type="date" id="to" min="${date}"></div></div>
     <div class="two"><div><label class="f" for="buddy">Buddy during absence</label><select id="buddy"><option value="">None</option>${buddies.map(p => `<option>${esc(p.name)}</option>`).join('')}</select></div><div></div></div>
@@ -697,7 +703,7 @@ function sheetVals() {
   const type = $('#other').value || (r ? r.value : 'AL');
   const from = $('#from').value, to = $('#to').value, multi = !!to && to !== from;
   const part = multi || fullOnly(from) ? 'FULL' : (f.querySelector('[name=part]:checked') || {value: 'FULL'}).value;   // several days are always full days
-  return {type, part, from, dates: expand(from, to), toRaw: to, buddy: $('#buddy').value, note: $('#note').value.trim()};
+  return {type, part, from, dates: expand(from, to), toRaw: to, rel: $('#rel') ? $('#rel').value : '', buddy: $('#buddy').value, note: $('#note').value.trim()};
 }
 const notifyLine = me => managersFor(me).map(m => esc(m.name) + (m.id === me.approver ? ' (approver)' : '')).join(' and ') || 'No one';
 function updSheet() {
@@ -708,7 +714,8 @@ function updSheet() {
   const wfh = v.type === 'WFH' || !me.approver;
   if (!v.from) { box.innerHTML = '<div class="warnbox">Pick a start date.</div>'; go.disabled = true; return; }
   if (!v.dates.length) { box.innerHTML = '<div class="warnbox">The end date is before the start date.</div>'; go.disabled = true; return; }
-  const blk = blockReason(me, v.type, v.dates);
+  const rr = $('#relRow'); if (rr) rr.style.display = v.type === 'CDL' ? '' : 'none';
+  const blk = blockReason(me, v.type, v.dates, v.rel);
   if (blk) { box.innerHTML = `<div class="warnbox">${esc(blk)}</div>`; go.disabled = true; return; }
   go.disabled = false;
   const days = v.dates.reduce((a, d) => a + dayVal(d, v.part), 0);
@@ -723,16 +730,16 @@ function updSheet() {
 }
 function submitLeave() {
   const me = cur(), v = sheetVals(); if (!v.dates.length) return;
-  if (blockReason(me, v.type, v.dates)) return;
+  if (blockReason(me, v.type, v.dates, v.rel)) return;
   const conf = conflicts(me, v.dates, v.part), batch = uid(), rules = ruleWarnings(me, v.type, v.dates, v.part);
   // replace anything of mine that overlaps: a full day replaces both halves, AM replaces AM/full, PM replaces PM/full
   db.leaves = db.leaves.filter(l => !(l.pid === me.id && v.dates.includes(l.date) && overlap(v.part, partOf(l))));
-  v.dates.forEach((d, i) => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, part: v.part, status: (v.type === 'WFH' || !me.approver) ? 'approved' : 'pending', buddy: v.buddy, note: v.note, batch, created: Date.now(), flags: i === 0 ? rules : undefined}));
+  v.dates.forEach((d, i) => db.leaves.push({id: uid(), pid: me.id, date: d, type: v.type, part: v.part, status: (v.type === 'WFH' || !me.approver) ? 'approved' : 'pending', buddy: v.buddy, rel: v.type === 'CDL' ? v.rel : undefined, note: v.note, batch, created: Date.now(), flags: i === 0 ? rules : undefined}));
   const mgrs = notifyManagers(me, v.type, v.dates, conf, v.part, batch, rules);
   save(); closeSheet(); render();
   const m = mgrs.find(x => x.id === me.approver && x.email) || mgrs.find(x => x.email);
   if (!mgrs.length) return toast('Saved. There is no other manager to notify.');
-  const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)}${v.part === 'FULL' ? '' : ', ' + PARTS[v.part]} (${daysText(v.dates.reduce((a, d) => a + dayVal(d, v.part), 0))}).` + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
+  const body = `${me.name} applied for ${TYPES[v.type].name}, ${rangeText(v.dates)}${v.part === 'FULL' ? '' : ', ' + PARTS[v.part]} (${daysText(v.dates.reduce((a, d) => a + dayVal(d, v.part), 0))}).` + (v.type === 'CDL' ? `\nRelationship: ${v.rel}` : '') + (v.note ? `\nRemarks: ${v.note}` : '') + (v.buddy ? `\nBuddy: ${v.buddy}` : '') + (conf.length ? `\nClash: ${conf.map(c => fmtShort(c.date) + ' ' + c.others.map(o => first(o.name)).join('/') + ' away').join('; ')}` : '');
   toast(`${(v.type === 'WFH' || !me.approver) ? 'Saved, no approval needed.' : 'Sent for approval.'} ${mgrs.map(x => first(x.name)).join(', ')} notified.`, m ? {href: `mailto:${m.email}?subject=${encodeURIComponent('Leave application: ' + me.name)}&body=${encodeURIComponent(body)}`, label: 'Also email'} : null);
 }
 function closeSheet() { $('#overlay').classList.remove('on'); $('#overlay').innerHTML = ''; sheet = null; }
