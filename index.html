@@ -261,16 +261,16 @@ const rangeText = ds => ds.length === 1 ? fmtShort(ds[0]) : `${fmtShort(ds[0])} 
 const API = window.__API__ || 'https://ecjwbiycwznkjbhxwixh.supabase.co/functions/v1/api';
 const emptyDb = () => ({v: 9, depts: [], people: [], leaves: [], notes: [], ph: [], early: []});
 function load() {
-  try { const d = JSON.parse(sessionStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return d; } catch (e) {}
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.people)) return d; } catch (e) {}
   return emptyDb();
 }
-function save() { try { sessionStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} phMap = null; if (typeof scheduleSync === 'function') scheduleSync(); }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} phMap = null; if (typeof scheduleSync === 'function') scheduleSync(); }
 try { ['allins-leave-v2', 'allins-sync'].forEach(k => localStorage.removeItem(k)); } catch (e) {}      // older versions kept everything on the device
 let db = load();
 
 /* ---------- UI state ---------- */
 const ui = {
-  me: sessionStorage.getItem('allins-me') || null,
+  me: localStorage.getItem('allins-me') || null,
   view: 'home', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1), dept: null,
   login: {pid: null, err: ''}
 };
@@ -412,7 +412,7 @@ function decide(batch, ok) {
 /* ---------- rendering ---------- */
 function render() {
   const me = cur();
-  if (!me) { ui.me = null; sessionStorage.removeItem('allins-me'); $('#app').innerHTML = loginHTML(); setBadge(0); return; }
+  if (!me) { ui.me = null; localStorage.removeItem('allins-me'); $('#app').innerHTML = loginHTML(); setBadge(0); return; }
   if (!ui.dept || (ui.dept !== '*' && !db.depts.includes(ui.dept))) ui.dept = isAdmin(me) ? '*' : me.dept;
   $('#app').innerHTML = headerHTML(me) + (ui.view === 'team' && (isMgr(me) || isAdmin(me)) ? teamHTML() : ui.view === 'approvals' && isMgr(me) ? approvalsHTML(me) : homeHTML(me));
   alertCheck();
@@ -861,14 +861,14 @@ document.addEventListener('submit', async e => {
   if (creating && pin !== $('#pin2').value) { ui.login.err = 'The two PINs don’t match.'; return render(); }
   try {
     const r = await api('login', {pid: p.id, pin, create: creating}, true);
-    sessionStorage.setItem('allins-token', r.token); sessionStorage.setItem('allins-me', p.id);
-    db = emptyDb(); sync = {cursor: 0, base: {}}; try { sessionStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (x) {}
+    localStorage.setItem('allins-token', r.token); localStorage.setItem('allins-me', p.id);
+    db = emptyDb(); sync = {cursor: 0, base: {}}; try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (x) {}
     ui.me = p.id; ui.login = {pid: null, err: ''};
     await doSync(true);
     const me = cur(); if (!me) throw new Error('Couldn’t load your data. Please try again.');
     ui.dept = isAdmin(me) ? '*' : me.dept; ui.view = isAdmin(me) ? 'team' : 'home'; render(); ensurePush();
   } catch (err) {
-    sessionStorage.removeItem('allins-token'); sessionStorage.removeItem('allins-me'); ui.me = null;
+    localStorage.removeItem('allins-token'); localStorage.removeItem('allins-me'); ui.me = null;
     ui.login.err = err.message || 'Couldn’t sign in. Check your connection.'; await loadDirectory(true); render();
   }
 });
@@ -883,7 +883,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 /* ---------- shared database: every device sees the same data, but only what you are allowed to see ---------- */
 const SYNC_KEY = 'allins-sync';
-let sync = (() => { try { return JSON.parse(sessionStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();   // {cursor, base: {key: stable json | 'x'}}
+let sync = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();   // {cursor, base: {key: stable json | 'x'}}
 let syncBusy = false, syncAgain = false, syncT = null, syncLabel = '', renderLater = false;
 const stable = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
 const cfgOf = () => ({depts: db.depts, ph: db.ph || [], early: db.early || [], codes: db.codes || {}});
@@ -891,14 +891,14 @@ function localRecords() { const m = {}; db.people.forEach(p => m['p:' + p.id] = 
 const arrOf = k => k === 'p' ? db.people : k === 'l' ? db.leaves : k === 'n' ? db.notes : null;
 function setSyncLabel(t) { syncLabel = t; const e = $('#syncst'); if (e) e.textContent = t; }
 async function api(action, body, noAuth) {
-  const token = noAuth ? undefined : sessionStorage.getItem('allins-token');
+  const token = noAuth ? undefined : localStorage.getItem('allins-token');
   const r = await fetch(API, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, token, ...(body || {})})});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(j.error || ('Server error ' + r.status)); e.status = r.status; throw e; }
   return j;
 }
 function wipeSession() {
-  ['allins-token', 'allins-me', KEY, SYNC_KEY].forEach(k => sessionStorage.removeItem(k));
+  ['allins-token', 'allins-me', KEY, SYNC_KEY].forEach(k => localStorage.removeItem(k));
   db = emptyDb(); sync = null; ui.me = null; ui.view = 'home'; ui.login = {pid: null, err: ''}; phMap = null;
 }
 async function flushSync() { clearTimeout(syncT); for (let i = 0; i < 40 && syncBusy; i++) await new Promise(r => setTimeout(r, 100)); await doSync(); }
@@ -935,7 +935,7 @@ function pendingChanges() {
   return up;
 }
 async function doSync(fromLogin) {
-  if (!sessionStorage.getItem('allins-token')) return;
+  if (!localStorage.getItem('allins-token')) return;
   if (syncBusy) { syncAgain = true; return; }
   syncBusy = true;
   try {
@@ -949,9 +949,10 @@ async function doSync(fromLogin) {
       (r.fix || []).forEach(x => { if (applyRemote(x, true)) changed = true; });
       (r.rows || []).forEach(x => { if (applyRemote(x)) changed = true; });
       sync.cursor = r.cursor; more = !!r.more;
+      if (r.token && ui.me && localStorage.getItem('allins-token')) localStorage.setItem('allins-token', r.token);      // sliding 30-day sign-in
       if (rej.size) toast('Some changes weren’t allowed and were undone.');
     }
-    try { sessionStorage.setItem(KEY, JSON.stringify(db)); sessionStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} phMap = null;
+    try { localStorage.setItem(KEY, JSON.stringify(db)); localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} phMap = null;
     if (changed || renderLater) { if (fromLogin) {} else afterPull(); }
     setSyncLabel('Synced ' + new Date().toLocaleTimeString('en-SG', {hour: 'numeric', minute: '2-digit'}) + '.');
   } catch (e) {
@@ -971,7 +972,7 @@ const urlB64 = s => Uint8Array.from(atob((s + '='.repeat((4 - s.length % 4) % 4)
 async function pushEndpoint() { try { if (!swReg || !swReg.pushManager) return ''; const s = await swReg.pushManager.getSubscription(); return s ? s.endpoint : ''; } catch (e) { return ''; } }
 async function ensurePush() {
   try {
-    if (!('PushManager' in window) || !('Notification' in window) || Notification.permission !== 'granted' || !sessionStorage.getItem('allins-token')) return;
+    if (!('PushManager' in window) || !('Notification' in window) || Notification.permission !== 'granted' || !localStorage.getItem('allins-token')) return;
     const reg = swReg || await navigator.serviceWorker.ready; swReg = reg;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) { const cfg = await api('config', {}, true); sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: urlB64(cfg.vapidPublicKey)}); }
@@ -981,7 +982,7 @@ async function ensurePush() {
 setInterval(() => { if (document.visibilityState === 'visible') doSync(); }, 8000);
 window.addEventListener('online', () => doSync());
 render();
-if (sessionStorage.getItem('allins-token') && ui.me) doSync().then(ensurePush); else { wipeSession(); loadDirectory(); }
+if (localStorage.getItem('allins-token') && ui.me) doSync().then(ensurePush); else { wipeSession(); loadDirectory(); }
 fetchMomPH(false);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const hadCtl = !!navigator.serviceWorker.controller; let reloaded = false;
