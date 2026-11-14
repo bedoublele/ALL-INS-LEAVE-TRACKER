@@ -202,6 +202,10 @@ const first = n => String(n).split(' ')[0];
 const COLORS = ['#E4572E','#F29E4C','#E8B923','#7BB661','#2E9E6B','#2BB5B8','#3F6FD9','#3F3FA8','#8E5CC9','#D45FA6','#8A6A52','#4A4A4A'];
 const colorOf = p => /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : COLORS[[...String(p.id)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
 const inkOn = hex => { const n = parseInt(hex.slice(1), 16), L = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return L > 0.62 ? '#111' : '#fff'; };
+const DEFAULT_CODES = {AL:'AL', MC:'MC', TR:'TR', CCL:'CCL', BDL:'BIL', ML:'ML', WFH:'WFH', HL:'HL', UL:'UL', UPL:'UPL'};
+const codeOf = t => t === 'X' ? 'Away' : ((db.codes && db.codes[t]) || DEFAULT_CODES[t] || t);
+const initialsOf = p => { if (/^[A-Za-z]{1,4}$/.test(p.ini || '')) return p.ini.toUpperCase(); const w = String(p.name || '').trim().split(/\s+/); return (w.length > 1 ? w[0][0] + w[1][0] : String(p.name || '?').slice(0, 2)).toUpperCase(); };
+const cleanIni = v => String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
 const shortName = p => db.people.some(x => x.id !== p.id && first(x.name) === first(p.name)) ? first(p.name) + ' ' + (String(p.name).split(' ')[1] || '').charAt(0) : first(p.name);
 function bdayOK(dob, ds) {           // birthday leave must fall within 3 months of the birthday (before or after)
   if (!dob) return false; const [, m, d] = dob.split('-').map(Number), t = parse(ds);
@@ -578,15 +582,15 @@ function calendarHTML(me) {
     const worstDept = Object.keys(per).sort((a, b) => per[b] - per[a])[0], n = worstDept ? per[worstDept] : 0;
     const mineHere = away.some(x => x.p.id === me.id);
     const chips = away.slice(0, 3).map(({p, l}) => {
-      const show = isMgr(me) || p.id === me.id || ['AL','TR','WFH','BDL'].includes(l.type), cp = colorOf(p), code = (show ? l.type : 'Away') + (partOf(l) === 'FULL' ? '' : ' ' + partOf(l));
+      const show = isMgr(me) || p.id === me.id || ['AL','TR','WFH','BDL'].includes(l.type), cp = colorOf(p), code = (show ? codeOf(l.type) : 'Away') + (partOf(l) === 'FULL' ? '' : ' ' + partOf(l));
       const st = l.type === 'WFH' ? `background:#fff;border:2px solid ${cp};color:#111` : `background:${cp};color:${inkOn(cp)}`;
-      return `<span class="chip ${isPending(l) ? 'pend' : ''}" style="${st}" title="${esc(p.name)} (${esc(p.dept)}): ${show ? TYPES[l.type].name : 'Away'}${isPending(l) ? ' (awaiting approval)' : ''}${partOf(l) === 'FULL' ? '' : ', ' + PARTS[partOf(l)]}"><i>${esc(shortName(p))}</i><b><s>- </s>${code}</b></span>`;
+      return `<span class="chip ${isPending(l) ? 'pend' : ''}" style="${st}" title="${esc(p.name)} (${esc(p.dept)}): ${show ? TYPES[l.type].name : 'Away'}${isPending(l) ? ' (awaiting approval)' : ''}${partOf(l) === 'FULL' ? '' : ', ' + PARTS[partOf(l)]}"><i>${esc(initialsOf(p))}</i><b><s>- </s>${code}</b></span>`;
     }).join('') + (away.length > 3 ? `<span class="more">+${away.length - 3}</span>` : '');
     const label = `${fmt(k)}${phOf(k) ? ', public holiday: ' + phOf(k).name : isEarly(k) ? ', early release' : ''}. ${total ? total + ' away' : 'nobody away'}${n >= 2 ? ', over the limit in ' + worstDept : ''}`;
     return `<button class="cell ${wk ? 'wk' : ''} ${k === todayKey ? 'today' : ''} ${n >= 2 ? 'over' : ''} ${mineHere ? 'mine' : ''}" data-a="day" data-d="${k}" aria-label="${esc(label)}"><span class="hd"><span class="d">${d.getDate()}</span>${phOf(k) ? `<em class="phl" title="${esc(phOf(k).name)}">PH</em>` : isEarly(k) ? '<em class="phl" title="Early release">ER</em>' : ''}${n >= 2 ? `<em class="bdg" title="${esc(worstDept)}">${n}<span class="x"> away</span></em>` : ''}</span><span class="chips">${chips}</span></button>`;
   }).join('');
   const tabs = `<div class="tabs">${[...db.depts, '*'].map(d => `<button class="tab" aria-pressed="${d === dept}" data-a="dept" data-d="${esc(d)}">${d === '*' ? 'Everyone' : esc(d)}</button>`).join('')}</div>`;
-  const legend = '<span>Each person has their own colour. Entries read name - leave type.</span><span><i class="sw" style="border:2px solid var(--ink);background:#fff"></i>Work from home</span><span><i class="sw" style="background:var(--stone);outline:2px dashed var(--ink);outline-offset:-2px"></i>Awaiting approval</span><span><i class="sw" style="background:var(--accent-soft);border:2px solid var(--accent)"></i>More than one away</span><span><em class="phl" style="margin:0">PH</em>Public holiday</span><span><em class="phl" style="margin:0">ER</em>Early release</span>';
+  const legend = '<span>Each person has their own colour. Entries read initials - leave type (for example WY - AL).</span><span><i class="sw" style="border:2px solid var(--ink);background:#fff"></i>Work from home</span><span><i class="sw" style="background:var(--stone);outline:2px dashed var(--ink);outline-offset:-2px"></i>Awaiting approval</span><span><i class="sw" style="background:var(--accent-soft);border:2px solid var(--accent)"></i>More than one away</span><span><em class="phl" style="margin:0">PH</em>Public holiday</span><span><em class="phl" style="margin:0">ER</em>Early release</span>';
   return `<section class="card"><div class="cal-head"><button class="btn" data-a="month" data-n="-1" aria-label="Previous month">‹</button><h2>${MONTHS[mo]} ${y}</h2><button class="btn" data-a="month" data-n="1" aria-label="Next month">›</button>
     <button class="btn" data-a="today">Today</button><div class="grow"></div>${tabs}</div>
     <div class="sub" style="margin-bottom:6px">${dept === '*' ? 'Everyone' : esc(dept) + ' department'}. See who is away${isAdmin(me) ? '.' : ', and tap a day to mark your own leave.'} The red outline means more than one person from the same department is away or on WFH (maximum 1).</div>
@@ -596,7 +600,7 @@ function calendarHTML(me) {
 
 function myLeaveHTML(me) {
   const Y = String(new Date().getFullYear()), mine = db.leaves.filter(l => l.pid === me.id && l.date.startsWith(Y)).sort((a, b) => a.date.localeCompare(b.date));
-  const items = mine.length ? mine.map(l => `<div class="item"><span class="pill t-${l.type}">${l.type}</span><div class="grow"><b>${fmt(l.date)}</b> <span class="chipdept" style="margin-left:2px">${isPending(l) ? 'Pending approval' : 'Approved'}</span> · ${TYPES[l.type].name}${partOf(l) === 'FULL' ? '' : ' · ' + PARTS[partOf(l)]}${l.buddy ? `<div class="sub">Buddy: ${esc(l.buddy)}</div>` : ''}${l.remark ? `<div class="sub">Manager’s remark: ${esc(l.remark)}</div>` : ''}${l.note ? `<div class="sub">${esc(l.note)}</div>` : ''}</div><button class="btn ghost danger" data-a="del" data-id="${l.id}" aria-label="Remove ${fmt(l.date)}">Remove</button></div>`).join('')
+  const items = mine.length ? mine.map(l => `<div class="item"><span class="pill t-${l.type}">${esc(codeOf(l.type))}</span><div class="grow"><b>${fmt(l.date)}</b> <span class="chipdept" style="margin-left:2px">${isPending(l) ? 'Pending approval' : 'Approved'}</span> · ${TYPES[l.type].name}${partOf(l) === 'FULL' ? '' : ' · ' + PARTS[partOf(l)]}${l.buddy ? `<div class="sub">Buddy: ${esc(l.buddy)}</div>` : ''}${l.remark ? `<div class="sub">Manager’s remark: ${esc(l.remark)}</div>` : ''}${l.note ? `<div class="sub">${esc(l.note)}</div>` : ''}</div><button class="btn ghost danger" data-a="del" data-id="${l.id}" aria-label="Remove ${fmt(l.date)}">Remove</button></div>`).join('')
     : '<div class="sub" style="margin-top:10px">Nothing marked yet. Tap a day on the calendar to start.</div>';
   return `<section class="card"><h2>My leave in ${Y}</h2>${items}</section>`;
 }
@@ -626,7 +630,10 @@ function teamHTML() {
     <div class="two" style="margin-top:10px"><div><label class="f" for="phd">Date</label><input type="date" id="phd"></div><div><label class="f" for="phn">Name</label><input type="text" id="phn" placeholder="e.g. Deepavali"></div></div><div class="actions"><button class="btn" data-a="ph-add">Add public holiday</button></div>
     <div class="dept-h">Early release days</div>${dl(db.early || [], 'er')}
     <div class="two" style="margin-top:10px"><div><label class="f" for="erd">Date</label><input type="date" id="erd"></div><div><label class="f" for="ern">Note</label><input type="text" id="ern" placeholder="e.g. CNY eve"></div></div><div class="actions"><button class="btn" data-a="er-add">Add early release day</button></div></section>` : '';
-  return approverCard + calCard + help + `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}${adminRows}</section>
+  const codeCard = isAdmin(meP) ? `<section class="card" id="codes"><h2>Leave type initials</h2><div class="sub">The short code shown on the calendar for each leave type. Up to 4 letters or numbers, each one different.</div>
+    ${Object.keys(DEFAULT_CODES).map(t => `<div class="item"><div class="grow"><label for="code_${t}"><b>${esc(TYPES[t].name)}</b></label></div><input type="text" id="code_${t}" maxlength="4" value="${esc(codeOf(t))}" style="width:96px;text-transform:uppercase"></div>`).join('')}
+    <div class="actions"><button class="btn" data-a="codes-reset">Reset to default</button><button class="btn primary" data-a="codes-save">Save initials</button></div></section>` : '';
+  return approverCard + codeCard + calCard + help + `<section class="card"><div class="row"><div class="grow"><h2>Team and entitlements</h2><div class="sub">Add staff, set departments, managers and leave entitlements.</div></div><button class="btn primary" data-a="edit" data-id="">Add person</button></div>${groups}${adminRows}</section>
     <section class="card"><h2>Backup</h2><div class="sub">Data is stored in the team’s private database. Export a copy of what you can see as a backup.</div><div class="actions"><button class="btn" data-a="export">Export data</button></div></section>`;
 }
 
@@ -638,7 +645,7 @@ function openSheet(date) {
   sheet = {date};
   const seg = ['AL','MC','TR'].map((t, i) => `<label><input type="radio" name="type" value="${t}" ${i === 0 ? 'checked' : ''}>${TYPES[t].name}</label>`).join('');
   $('#overlay').innerHTML = `<form class="sheet" id="sheetForm"><h2>Apply for leave</h2>
-    <div class="sub">${fmt(date)} · ${away.length ? 'away: ' + away.map(x => esc(first(x.p.name)) + (x.p.dept !== me.dept ? ' [' + esc(x.p.dept) + ']' : '') + (isMgr(me) || x.l.type === 'AL' || x.l.type === 'TR' ? ' (' + x.l.type + ')' : '') + (partOf(x.l) === 'FULL' ? '' : ' ' + partOf(x.l))).join(', ') : 'nobody else is away'}</div>
+    <div class="sub">${fmt(date)} · ${away.length ? 'away: ' + away.map(x => esc(first(x.p.name)) + (x.p.dept !== me.dept ? ' [' + esc(x.p.dept) + ']' : '') + (isMgr(me) || x.l.type === 'AL' || x.l.type === 'TR' ? ' (' + codeOf(x.l.type) + ')' : '') + (partOf(x.l) === 'FULL' ? '' : ' ' + partOf(x.l))).join(', ') : 'nobody else is away'}</div>
     ${mineAll.map(m => `<div class="okbox">You already have <b>${TYPES[m.type].name}</b> on this day (${PARTS[partOf(m)]}). <button type="button" class="btn danger" style="margin-left:8px" data-a="del-sheet" data-id="${m.id}">Remove it</button></div>`).join('')}
     <div class="seg" role="radiogroup" aria-label="Leave type">${seg}</div>
     <label class="f" id="partLbl">How long</label>
@@ -650,11 +657,13 @@ function openSheet(date) {
     <div><label class="f" for="to">To (for more than one day)</label><input type="date" id="to" min="${date}"></div></div>
     <div class="two"><div><label class="f" for="buddy">Buddy during absence</label><select id="buddy"><option value="">None</option>${buddies.map(p => `<option>${esc(p.name)}</option>`).join('')}</select></div><div></div></div>
     <label class="f">My colour on the calendar</label><div class="swrow" id="colors">${COLORS.map(c => `<button type="button" class="swatch ${c === colorOf(me) ? 'on' : ''}" data-a="pick-color" data-c="${c}" style="background:${c}" aria-label="Colour ${c}"></button>`).join('')}</div>
+    <label class="f" for="ini">My initials on the calendar (up to 4 letters)</label><input type="text" id="ini" maxlength="4" value="${esc(initialsOf(me))}" autocapitalize="characters" style="max-width:140px">
     <label class="f" for="note">Remarks (optional)</label><input type="text" id="note" maxlength="120" placeholder="e.g. Son’s medical appointment">
     <div id="warn"></div>
     <div class="actions"><button type="button" class="btn" data-a="close">Cancel</button><button class="btn primary" id="go">Apply leave</button></div></form>`;
   $('#overlay').classList.add('on');
   const f = $('#sheetForm'); f.addEventListener('input', updSheet); f.addEventListener('change', e => {
+    if (e.target.id === 'ini') { const v = cleanIni(e.target.value); if (v) { me.ini = v; save(); render(); } e.target.value = initialsOf(cur()); return; }
     if (e.target.name === 'type') $('#other').value = '';
     if (e.target.id === 'from') { $('#to').min = e.target.value; if ($('#to').value && $('#to').value < e.target.value) $('#to').value = ''; }
     if (e.target.id === 'other' && e.target.value) f.querySelectorAll('[name=type]').forEach(r => r.checked = false);
@@ -734,6 +743,7 @@ function openPerson(id) {
     ${isAdmin(cur()) ? `<label class="f" for="pa">Approving manager</label><select id="pa"><option value="" ${p.approver ? '' : 'selected'}>None (no approval needed)</option>${db.people.filter(m => isMgr(m) && m.id !== id).map(m => `<option value="${m.id}" ${p.approver === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>`
       : `<div class="sub" style="margin-top:12px">Approving manager: <b>${esc((db.people.find(x => x.id === p.approver) || {name: id ? 'none (no approval needed)' : 'Belle (default)'}).name)}</b>. Only the administrator can change this.</div>`}
     <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pc" style="width:auto" ${p.confirmed === false ? '' : 'checked'}> Confirmed staff (eligible for work from home)</label>
+    <label class="f" for="pini">Initials on the calendar (up to 4 letters)</label><input type="text" id="pini" maxlength="4" value="${esc(initialsOf(p))}" style="max-width:140px">
     <label class="f" for="pe">Email (for “Also email” on notifications)</label><input type="email" id="pe" value="${esc(p.email)}">
     <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}"></div>
     <div><label class="f" for="pdob">Date of birth</label><input type="date" id="pdob" max="${ymd(new Date())}" value="${esc(p.dob || '')}"></div></div>
@@ -748,7 +758,7 @@ function openPerson(id) {
     const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
     const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
     const rec = id ? db.people.find(x => x.id === id) : {id: uid()};
-    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver !== undefined && id ? rec.approver : defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, dob: $('#pdob').value || '', bmonth: $('#pdob').value ? Number($('#pdob').value.slice(5, 7)) : (rec.bmonth || 0)});
+    Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver !== undefined && id ? rec.approver : defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, dob: $('#pdob').value || '', ini: cleanIni($('#pini').value) || initialsOf({name}), bmonth: $('#pdob').value ? Number($('#pdob').value.slice(5, 7)) : (rec.bmonth || 0)});
     if (!id) db.people.push(rec);
     notifyTeam(cur(), id ? `${cur().name} updated ${name}’s details or entitlements` : `${cur().name} added ${name} to ${dept}`);
     if (!db.depts.includes(dept)) db.depts.push(dept);
@@ -778,6 +788,13 @@ document.addEventListener('click', e => {
     case 'dept': ui.dept = el.dataset.d; render(); break;
     case 'day': if (isAdmin(me)) toast('The administrator account doesn’t take leave.'); else openSheet(el.dataset.d); break;
     case 'close': closeSheet(); break;
+    case 'codes-save': { if (!isAdmin(me)) break; const c = {}; let bad = '';
+      Object.keys(DEFAULT_CODES).forEach(t => { const v = ($('#code_' + t).value || '').trim().toUpperCase(); if (!/^[A-Z0-9]{1,4}$/.test(v)) bad = TYPES[t].name; c[t] = v; });
+      const vals = Object.values(c), dup = vals.find((v, i) => vals.indexOf(v) !== i);
+      if (bad) return toast(`Check the initials for ${bad}: 1 to 4 letters or numbers.`);
+      if (dup) return toast(`Two leave types use “${dup}”. Each needs its own initials.`);
+      db.codes = c; save(); render(); toast('Leave type initials saved.'); break; }
+    case 'codes-reset': if (isAdmin(me)) { db.codes = {}; save(); render(); toast('Back to the default initials.'); } break;
     case 'pick-color': { const c = el.dataset.c; if (/^#[0-9a-fA-F]{6}$/.test(c)) { me.color = c; save(); document.querySelectorAll('#colors .swatch').forEach(b => b.classList.toggle('on', b.dataset.c === c)); render(); } break; }
     case 'del': case 'del-sheet': {
       const gone = db.leaves.find(l => l.id === id); db.leaves = db.leaves.filter(l => l.id !== id);
@@ -838,7 +855,7 @@ const SYNC_KEY = 'allins-sync';
 let sync = (() => { try { return JSON.parse(sessionStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();   // {cursor, base: {key: stable json | 'x'}}
 let syncBusy = false, syncAgain = false, syncT = null, syncLabel = '', renderLater = false;
 const stable = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
-const cfgOf = () => ({depts: db.depts, ph: db.ph || [], early: db.early || []});
+const cfgOf = () => ({depts: db.depts, ph: db.ph || [], early: db.early || [], codes: db.codes || {}});
 function localRecords() { const m = {}; db.people.forEach(p => m['p:' + p.id] = p); db.leaves.forEach(l => m['l:' + l.id] = l); db.notes.forEach(n => m['n:' + n.id] = n); m['c:main'] = cfgOf(); return m; }
 const arrOf = k => k === 'p' ? db.people : k === 'l' ? db.leaves : k === 'n' ? db.notes : null;
 function setSyncLabel(t) { syncLabel = t; const e = $('#syncst'); if (e) e.textContent = t; }
@@ -869,7 +886,7 @@ function applyRemote(rec, force) {      // returns true if local data changed
   if (rec.kind === 'c') {
     if (rec.deleted || !rec.data) return false;
     if (!force && base[key] !== undefined && stable(cfgOf()) !== base[key]) return false;      // local change not pushed yet: local wins
-    const before = stable(cfgOf()); db.depts = rec.data.depts || db.depts; db.ph = rec.data.ph || []; db.early = rec.data.early || []; base[key] = stable(cfgOf());
+    const before = stable(cfgOf()); db.depts = rec.data.depts || db.depts; db.ph = rec.data.ph || []; db.early = rec.data.early || []; db.codes = rec.data.codes || {}; base[key] = stable(cfgOf());
     return before !== base[key];
   }
   const arr = arrOf(rec.kind); if (!arr) return false;
