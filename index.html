@@ -102,6 +102,10 @@ label.f{display:block;margin-top:14px;font-size:.9rem;color:var(--mute)}
 .t-WFH{background:transparent;border:1px dashed var(--mute)}
 .more{font-size:.75rem;color:var(--mute)}
 .cell .chips{display:flex;flex-direction:column;gap:2px}
+.keygrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 12px;margin:6px 0}
+.keyit{display:flex;align-items:center;gap:8px;font-size:.9rem}
+.keychip{display:inline-block;white-space:nowrap;flex-shrink:0;min-width:38px;text-align:center;border-radius:5px;padding:1px 6px;font-weight:700;font-size:.78rem}
+#key summary{cursor:pointer;list-style:none}
 .swrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .swatch{width:34px;height:34px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px var(--line);padding:0}
 .swatch.on{box-shadow:0 0 0 3px var(--ink)}
@@ -465,13 +469,25 @@ function policyHTML() {
     <li><b>Early release:</b> if the company approves early release and you are on leave, it counts as 1 full day of leave.</li></ul>
     <div class="sub" style="margin-top:10px">The app flags any rule you may break when you apply, and your approving manager sees the flags when deciding.</div></details></section>`;
 }
+function keyHTML() {
+  const people = db.people.filter(p => !isAdmin(p));
+  const byDept = db.depts.map(d => ({d, m: people.filter(p => p.dept === d)})).filter(x => x.m.length);
+  const types = Object.keys(DEFAULT_CODES).filter(t => TYPES[t]);
+  return `<section class="card" id="key"><details><summary><h2 style="display:inline">Calendar key</h2> <span class="sub">Who the initials are and what the codes mean</span></summary>
+    <div class="dept-h">Staff initials</div>
+    ${byDept.map(x => `<div class="sub" style="margin:6px 0 2px"><b>${esc(x.d)}</b></div><div class="keygrid">${x.m.map(p => `<div class="keyit"><span class="keychip" style="background:${colorOf(p)};color:${inkOn(colorOf(p))}">${esc(initialsOf(p))}</span> ${esc(p.name)}</div>`).join('')}</div>`).join('')}
+    <div class="dept-h">Leave type codes</div>
+    <div class="keygrid">${types.map(t => `<div class="keyit"><span class="keychip" style="background:var(--ink);color:#fff">${esc(codeOf(t))}</span> ${esc(TYPES[t].name)}</div>`).join('')}
+      <div class="keyit" style="grid-column:1/-1"><span class="keychip" style="background:var(--ink);color:#fff">Away</span> Private leave (shown to other staff without the type)</div></div>
+    <div class="sub" style="margin-top:8px">Entries read initials - code, for example <b>WY - AL</b> is Wyonna on Annual Leave. A dashed outline means the request is still waiting for approval, and a white bar with a coloured outline is work from home.</div></details></section>`;
+}
 function homeHTML(me) {
-  if (isAdmin(me)) return calendarHTML(me) + '<div class="footer">Administrator view. The calendar is read-only; use Admin to manage approving managers and people.</div>' + policyHTML();
+  if (isAdmin(me)) return calendarHTML(me) + keyHTML() + '<div class="footer">Administrator view. The calendar is read-only; use Admin to manage approving managers and people.</div>' + policyHTML();
   const pm = 'Notification' in window ? Notification.permission : 'unsupported';
   const pushBanner = pm === 'default' ? `<section class="card" style="border-left:6px solid var(--accent)"><div class="row"><div class="grow"><h2>Turn on notifications</h2><div class="sub">${isMgr(me) ? 'Get an alert on this phone when a leave needs your approval, and when leave is approved or rejected, even when the app is closed.' : 'Get an alert on this phone when your leave is approved or rejected, even when the app is closed.'}</div></div><button class="btn primary" data-a="enable-push">Turn on</button></div></section>`
     : pm === 'unsupported' ? `<section class="card" style="border-left:6px solid var(--accent)"><h2>Notifications need the Home Screen app</h2><div class="sub">On iPhone, tap Share, then Add to Home Screen, and open the app from that icon. Then come back here and turn on notifications.</div></section>`
     : pm === 'denied' ? `<section class="card" style="border-left:6px solid var(--accent)"><h2>Notifications are blocked</h2><div class="sub">Allow notifications for this app in your phone or browser settings, then reopen the app.</div></section>` : '';
-  return pushBanner + balanceHTML(me) + notesHTML(me) + calendarHTML(me) + myLeaveHTML(me) + policyHTML() +
+  return pushBanner + balanceHTML(me) + notesHTML(me) + calendarHTML(me) + keyHTML() + myLeaveHTML(me) + policyHTML() +
     '<div class="footer">Shared with your team and saved on this device. <span id="syncst">' + esc(typeof syncLabel === 'string' ? syncLabel : '') + '</span> Each person’s balance is shown only after signing in with their own PIN.</div>';
 }
 
