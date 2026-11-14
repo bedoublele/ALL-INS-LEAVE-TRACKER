@@ -762,7 +762,8 @@ function setApprover(pid, newId) {
 const defaultApprover = self => { const b = db.people.find(p => p.name === 'Belle' && isMgr(p)) || db.people.find(p => isMgr(p) && p.id !== self); return b ? b.id : ''; };
 function openPerson(id) {
   const p = id ? db.people.find(x => x.id === id) : {id: '', name: '', dept: db.depts[0] || '', role: 'staff', email: '', ent: {AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14}, bf: 0, bmonth: 0};
-  const E = t => `<div><label class="f" for="e_${t}">${TYPES[t].name}</label><input type="number" id="e_${t}" min="0" step="0.5" value="${p.ent[t] ?? 0}"></div>`;
+  const adm = isAdmin(cur()), lock = adm ? '' : 'disabled';
+  const E = t => `<div><label class="f" for="e_${t}">${TYPES[t].name}</label><input type="number" id="e_${t}" min="0" step="0.5" value="${p.ent[t] ?? 0}" ${lock}></div>`;
   $('#overlay').innerHTML = `<form class="sheet" id="personForm"><h2>${id ? 'Edit person' : 'Add person'}</h2>
     <label class="f" for="pn">Name</label><input type="text" id="pn" value="${esc(p.name)}" required>
     <div class="two"><div><label class="f" for="pd">Department</label><input type="text" id="pd" list="dl" value="${esc(p.dept)}" required><datalist id="dl">${db.depts.map(d => `<option>${esc(d)}</option>`).join('')}</datalist></div>
@@ -773,19 +774,20 @@ function openPerson(id) {
     <label class="f" for="pini">Initials on the calendar (up to 4 letters)</label><input type="text" id="pini" maxlength="4" value="${esc(initialsOf(p))}" style="max-width:140px">
     <label class="f">Calendar colour</label><input type="hidden" id="pcolor" value="${esc(colorOf(p))}"><div class="swrow" id="pcolors">${COLORS.map(c => `<button type="button" class="swatch ${c.toLowerCase() === colorOf(p).toLowerCase() ? 'on' : ''}" data-a="pf-color" data-c="${c}" style="background:${c}" aria-label="Colour ${c}"></button>`).join('')}</div>
     <label class="f" for="pe">Email (for “Also email” on notifications)</label><input type="email" id="pe" value="${esc(p.email)}">
-    <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}"></div>
+    <div class="two"><div><label class="f" for="pb">Annual leave brought forward</label><input type="number" id="pb" min="0" step="0.5" value="${p.bf || 0}" ${lock}></div>
     <div><label class="f" for="pdob">Date of birth</label><input type="date" id="pdob" max="${ymd(new Date())}" value="${esc(p.dob || '')}"></div></div>
     <div class="sub" style="margin-top:6px">Birthday leave can only be applied within 3 months of the birthday.</div>
-    <h2 style="margin-top:20px">Yearly entitlement (days)</h2><div class="two">${BAL.map(E).join('')}</div>
+    <h2 style="margin-top:20px">Yearly entitlement (days)</h2>${adm ? '' : '<div class="sub">Only the administrator can change leave entitlements.</div>'}<div class="two">${BAL.map(E).join('')}</div>
     <div class="sub" style="margin-top:8px">Annual leave: 14 for staff, up to 16 for executives. Brought forward is capped at 50% of entitlement.</div>
     <div class="actions"><button type="button" class="btn" data-a="close">Cancel</button>${id && id !== ui.me ? '<button type="button" class="btn" data-a="reset-pin" data-id="' + id + '">Reset PIN</button>' : ''}${id && id !== ui.me ? '<button type="button" class="btn danger" data-a="del-person" data-id="' + id + '">Delete</button>' : ''}<button class="btn primary">Save</button></div></form>`;
   $('#overlay').classList.add('on');
   $('#personForm').addEventListener('submit', e => {
     e.preventDefault();
     const name = $('#pn').value.trim(), dept = $('#pd').value.trim(); if (!name || !dept) return;
-    const ent = {}; BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0);
-    const bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5);
     const rec = id ? db.people.find(x => x.id === id) : {id: uid()};
+    let ent = {}, bf;
+    if (adm) { BAL.forEach(t => ent[t] = Number($('#e_' + t).value) || 0); bf = Math.min(Number($('#pb').value) || 0, ent.AL * 0.5); }
+    else { ent = id ? rec.ent : {AL:14, CCL:6, BDL:1, ML:0, WFH:0, HL:60, MC:14}; bf = id ? (rec.bf || 0) : 0; }      // managers can't change entitlements
     Object.assign(rec, {name, dept, role: $('#pr').value, approver: $('#pa') ? $('#pa').value : (rec.approver !== undefined && id ? rec.approver : defaultApprover(rec.id)), email: $('#pe').value.trim(), confirmed: $('#pc').checked, ent, bf, color: $('#pcolor').value, dob: $('#pdob').value || '', ini: cleanIni($('#pini').value) || initialsOf({name}), bmonth: $('#pdob').value ? Number($('#pdob').value.slice(5, 7)) : (rec.bmonth || 0)});
     if (!id) db.people.push(rec);
     notifyTeam(cur(), id ? `${cur().name} updated ${name}’s details or entitlements` : `${cur().name} added ${name} to ${dept}`);
